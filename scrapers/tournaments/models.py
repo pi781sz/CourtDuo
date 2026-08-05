@@ -6,13 +6,22 @@ sources"): a tournament is the overall competition, an event is one
 tournaments have no `Gra podwójna` event at all, and those are the only
 ones this product cares about — so `Tournament.doubles_events` /
 `Event.is_doubles` are the fields everything downstream keys off.
+
+Director, referee, entry fee, court surface/count and ball brand are
+deliberately not modelled — CourtDuo has no use for them, and entry_fee
+in particular carries the organiser's bank account number, which has no
+business in a public repository.
 """
 
 from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, time
+from zoneinfo import ZoneInfo
+
+_WARSAW_TZ = ZoneInfo("Europe/Warsaw")
+_UTC = ZoneInfo("UTC")
 
 
 class AgeCategory(enum.Enum):
@@ -90,16 +99,6 @@ class Event:
 
 
 @dataclass
-class TournamentDirector:
-    name: str | None = None
-    phone: str | None = None
-    email: str | None = None
-
-    def to_dict(self) -> dict:
-        return {"name": self.name, "phone": self.phone, "email": self.email}
-
-
-@dataclass
 class Tournament:
     guid: str | None
     name: str
@@ -111,12 +110,8 @@ class Tournament:
     organiser: str | None
     venue_address: str | None
     wojewodztwo: str | None
-    entry_deadline: date | None
-    withdrawal_deadline: date | None
-    director: TournamentDirector
-    entry_fee: str | None
-    court_surface: str | None
-    court_count: int | None
+    entry_deadline: datetime | None
+    withdrawal_deadline: datetime | None
     events: list[Event] = field(default_factory=list)
     source_url: str | None = None
 
@@ -128,7 +123,24 @@ class Tournament:
     def has_doubles(self) -> bool:
         return len(self.doubles_events) > 0
 
+    @property
+    def search_closes_at(self) -> datetime | None:
+        """UTC instant at which searches for this tournament close.
+
+        Per CLAUDE.md, "Search expiry rule": searches stay open until 10:00
+        Europe/Warsaw on the tournament's start date, not the (much
+        earlier) entry deadline — doubles partners are often found at the
+        venue on the morning of play. Poland's UTC offset changes between
+        summer and winter, so this must go through zoneinfo rather than a
+        hardcoded offset.
+        """
+        if self.date_from is None:
+            return None
+        local = datetime.combine(self.date_from, time(10, 0), tzinfo=_WARSAW_TZ)
+        return local.astimezone(_UTC)
+
     def to_dict(self) -> dict:
+        closes_at = self.search_closes_at
         return {
             "guid": self.guid,
             "name": self.name,
@@ -143,10 +155,7 @@ class Tournament:
             "wojewodztwo": self.wojewodztwo,
             "entry_deadline": self.entry_deadline.isoformat() if self.entry_deadline else None,
             "withdrawal_deadline": self.withdrawal_deadline.isoformat() if self.withdrawal_deadline else None,
-            "director": self.director.to_dict(),
-            "entry_fee": self.entry_fee,
-            "court_surface": self.court_surface,
-            "court_count": self.court_count,
+            "search_closes_at": closes_at.isoformat() if closes_at else None,
             "has_doubles": self.has_doubles,
             "events": [e.to_dict() for e in self.events],
             "source_url": self.source_url,
