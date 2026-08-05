@@ -1,0 +1,38 @@
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+build/
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# --- Scraped / player data ---
+# No CSV, JSON, SQLite or fixture file containing player data may enter git.
+# Data lives in the database only (see CLAUDE.md, rule 5).
+*.csv
+*.json
+!locales/*.json
+*.sqlite
+*.sqlite3
+*.db
+/data/
+/scraped/
+/fixtures/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
