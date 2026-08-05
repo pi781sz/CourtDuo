@@ -34,6 +34,14 @@ async def fetch_category(client: httpx.AsyncClient, age_category: AgeCategory) -
     return parse_category_page(response.text, age_category, url)
 
 
+async def fetch_category_html(client: httpx.AsyncClient, age_category: AgeCategory) -> str:
+    """Fetches the raw category page HTML, without parsing. Used by --dump-html."""
+    await _rate_limiter.wait()
+    response = await client.get(age_category.url)
+    response.raise_for_status()
+    return response.text
+
+
 async def scrape_all(categories: list[AgeCategory] | None = None) -> list[Tournament]:
     categories = categories if categories is not None else list(AgeCategory)
     tournaments: list[Tournament] = []

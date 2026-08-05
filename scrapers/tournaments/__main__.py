@@ -6,6 +6,7 @@ Usage:
     python -m scrapers.tournaments --category 12 --category 14
     python -m scrapers.tournaments --doubles-only
     python -m scrapers.tournaments --pretty
+    python -m scrapers.tournaments --dump-html
 """
 
 from __future__ import annotations
@@ -16,8 +17,11 @@ import json
 import logging
 import sys
 
+from core.http import build_client
+
 from .models import AgeCategory
-from .scraper import scrape_all
+from .parser import find_first_tournament_html
+from .scraper import fetch_category_html, scrape_all
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -35,12 +39,34 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="Only include tournaments that have at least one Gra podwójna event.",
     )
     parser.add_argument("--pretty", action="store_true", help="Pretty-print the JSON output.")
+    parser.add_argument(
+        "--dump-html",
+        action="store_true",
+        help=(
+            "Print the raw HTML of the first tournament block on the page "
+            "(from the first requested/default category) to stdout instead "
+            "of JSON. For debugging when the page shape changes."
+        ),
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging on stderr.")
     return parser.parse_args(argv)
 
 
 async def _run(args: argparse.Namespace) -> int:
     categories = [AgeCategory(c) for c in args.category] if args.category else None
+
+    if args.dump_html:
+        category = categories[0] if categories else next(iter(AgeCategory))
+        async with build_client() as client:
+            html = await fetch_category_html(client, category)
+        block_html = find_first_tournament_html(html)
+        if block_html is None:
+            logging.error("No tournament block found for %s — page shape may have changed", category.label)
+            return 1
+        sys.stdout.write(block_html)
+        sys.stdout.write("\n")
+        return 0
+
     tournaments = await scrape_all(categories)
 
     if args.doubles_only:
