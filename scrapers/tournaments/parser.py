@@ -218,6 +218,20 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
     )
 
 
+def find_first_tournament_html(html: str) -> str | None:
+    """Returns the raw HTML of the first tournament block on a category page.
+
+    Used by `--dump-html` to inspect the exact markup PZT is currently
+    rendering, e.g. when `_LABEL_PATTERNS` stop matching and the parser
+    needs to be updated.
+    """
+    tree = HTMLParser(html)
+    if not tree.root:
+        return None
+    nodes = _find_tournament_nodes(tree.root)
+    return nodes[0].html if nodes else None
+
+
 def parse_category_page(html: str, age_category: AgeCategory, source_url: str) -> list[Tournament]:
     """Parses one Tournament.aspx?CategoryID=... page into Tournament objects."""
     tree = HTMLParser(html)
