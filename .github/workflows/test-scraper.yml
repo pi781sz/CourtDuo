@@ -20,3 +20,6 @@ jobs:
 
       - name: Run tournament scraper (U18, pretty JSON)
         run: python -m scrapers.tournaments --category 18 --pretty
+
+      - name: Dump first tournament block HTML (U18)
+        run: python -m scrapers.tournaments --category 18 --dump-html
