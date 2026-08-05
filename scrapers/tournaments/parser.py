@@ -1,20 +1,16 @@
 """Parses PZT tournament listing pages (Tournament.aspx?CategoryID=...).
 
-Field extraction is anchored on the literal Polish labels PZT renders
-("Termin zgłoszeń", "Termin odwołań", "Rozgrywki", the "Od: ... Do: ..."
-date pair, etc.) rather than on CSS classes or element ids. Those labels
-are stable, human-facing text; the surrounding markup is an ASP.NET
-WebForms GridView and its class names are the kind of thing that gets
-regenerated across PZT site updates. If PZT changes the wording of a
-label, `parse_category_page` logs and skips the tournament instead of
-writing partial/garbage data (see CLAUDE.md, "Scraping etiquette").
+Selectors are anchored on the CSS classes PZT actually renders (verified
+against a live fetch of Tournament.aspx?CategoryID=18, see
+tests/test_tournament_parser.py for the fixture), not guessed from field
+descriptions. Detail rows (div.tournAppContentRow2_B) are matched by their
+label TEXT rather than by position, since PZT reorders/omits rows per
+tournament (e.g. "Miejsce rozgrywek" is absent when the venue has no
+separate court-location table).
 
-NOTE: this parser could not be validated against a live fetch of
-portal.pzt.pl — the sandbox this was written in has no network route to
-that host. Field regexes are built from the exact field descriptions and
-label text in CLAUDE.md. Run `python -m scrapers.tournaments` against the
-real site and diff the JSON output against the live pages before trusting
-this in production; adjust `_LABEL_PATTERNS` if any label text differs.
+If PZT changes these classes or label wording, `parse_category_page` logs
+and skips the tournament instead of writing partial/garbage data (see
+CLAUDE.md, "Scraping etiquette").
 """
 
 from __future__ import annotations
@@ -25,7 +21,7 @@ from datetime import date, datetime
 
 from selectolax.parser import HTMLParser, Node
 
-from .models import AgeCategory, Event, Gender, PlayType, Tournament, TournamentDirector
+from .models import AgeCategory, Event, Gender, PlayType, Tournament
 
 logger = logging.getLogger(__name__)
 
@@ -37,26 +33,44 @@ _GUID_RE = re.compile(
 )
 
 _DATE_RANGE_RE = re.compile(r"Od:\s*(\d{4}\.\d{2}\.\d{2})\s*Do:\s*(\d{4}\.\d{2}\.\d{2})")
-_RANGA_RE = re.compile(r"Ranga:?\s*([1-7])\b")
-_ENTRY_DEADLINE_RE = re.compile(r"Termin zg[łl]osze[nń]:?\s*(\d{4}\.\d{2}\.\d{2})")
-_WITHDRAWAL_DEADLINE_RE = re.compile(r"Termin odwo[łl]a[nń]:?\s*(\d{4}\.\d{2}\.\d{2})")
-_ORGANISER_RE = re.compile(r"Organizator:?\s*(.+)")
-_VENUE_RE = re.compile(r"(?:Miejsce|Adres)(?: rozgrywania)?:?\s*(.+)")
-_WOJEWODZTWO_RE = re.compile(r"Wojew[óo]dztwo:?\s*(.+)")
-_DIRECTOR_RE = re.compile(r"Dyrektor turnieju:?\s*(.+)")
-_PHONE_RE = re.compile(r"(?:tel\.?|telefon)[:\s]*([+\d][\d\s-]{5,})", re.IGNORECASE)
-_EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
-_ENTRY_FEE_RE = re.compile(r"Wpisowe:?\s*(.+)")
-_SURFACE_RE = re.compile(r"Nawierzchnia:?\s*(.+)")
-_COURT_COUNT_RE = re.compile(r"Liczba kort[óo]w:?\s*(\d+)")
+
+_DATETIME_RE = re.compile(
+    r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2}).*?(?P<hour>\d{2}):(?P<minute>\d{2})"
+)
 
 _EVENT_LINE_RE = re.compile(
     r"Kategoria:\s*(?P<category>.+?)\s*Typ:\s*(?P<play_type>Gra pojedyncza|Gra podw[óo]jna)\s*;"
-    r"\s*(?P<gender>Ch[łl]opcy|Dziewcz[eę]ta)\s*;\s*(?P<draw>[^\n]*)",
+    r"\s*(?P<gender>Ch[łl]opcy|Dziewcz[eę]ta)\s*;\s*(?P<draw>.*)",
     re.IGNORECASE,
 )
 
-REQUIRED_MARKERS = ("Termin zg", "Rozgrywki")
+_PAREN_RE = re.compile(r"\(([^)]+)\)")
+
+WOJEWODZTWA = {
+    "dolnośląskie",
+    "kujawsko-pomorskie",
+    "lubelskie",
+    "lubuskie",
+    "łódzkie",
+    "małopolskie",
+    "mazowieckie",
+    "opolskie",
+    "podkarpackie",
+    "podlaskie",
+    "pomorskie",
+    "śląskie",
+    "świętokrzyskie",
+    "warmińsko-mazurskie",
+    "wielkopolskie",
+    "zachodniopomorskie",
+}
+
+LABEL_TERMIN_ZGLOSZEN = "Termin zgłoszeń"
+LABEL_TERMIN_ODWOLAN = "Termin odwołań"
+LABEL_MIEJSCE_ROZGRYWEK = "Miejsce rozgrywek"
+LABEL_ROZGRYWKI = "Rozgrywki"
+
+_TOURNAMENT_SELECTOR = "div.tournAppContainer_B"
 
 
 def _parse_pzt_date(raw: str) -> date | None:
@@ -68,44 +82,7 @@ def _parse_pzt_date(raw: str) -> date | None:
 
 
 def _find_tournament_nodes(root: Node) -> list[Node]:
-    """Finds the minimal (innermost) DOM nodes that each represent one tournament.
-
-    A tournament block is identified by containing all of REQUIRED_MARKERS in
-    its text plus a name line starting with a known type prefix. We keep only
-    the innermost matching nodes so nested containers (e.g. a table wrapping
-    a div wrapping the actual card) don't produce duplicate matches.
-    """
-    candidates: list[Node] = []
-    for node in root.css("*"):
-        text = node.text(separator="\n", strip=True)
-        if not text or len(text) > 20_000:
-            continue
-        # Require the type-prefix name line near the top of the block (not
-        # just anywhere) so we don't match the whole page body as one block.
-        if all(marker in text for marker in REQUIRED_MARKERS) and _TYPE_PREFIX_RE.search(text[:200]):
-            candidates.append(node)
-
-    minimal: list[Node] = []
-    for node in candidates:
-        is_minimal = True
-        for other in candidates:
-            if other == node:
-                continue
-            if _contains(node, other):
-                is_minimal = False
-                break
-        if is_minimal:
-            minimal.append(node)
-    return minimal
-
-
-def _contains(ancestor: Node, descendant: Node) -> bool:
-    parent = descendant.parent
-    while parent is not None:
-        if parent == ancestor:
-            return True
-        parent = parent.parent
-    return False
+    return root.css(_TOURNAMENT_SELECTOR)
 
 
 def _extract_guid(node: Node) -> str | None:
@@ -118,79 +95,152 @@ def _extract_guid(node: Node) -> str | None:
     return match.group(0) if match else None
 
 
-def _parse_events(text: str) -> list[Event]:
+def _row_label(row: Node) -> str | None:
+    label_node = row.css_first(".tournAppContentColL_B") or row.css_first(".tournAppContentColLBn_B")
+    if label_node is None:
+        return None
+    return label_node.text(strip=True)
+
+
+def _row_value_node(row: Node) -> Node | None:
+    return row.css_first(".tournAppContentColR_B") or row.css_first(".tournAppContentColR_B_p0")
+
+
+def _find_row(rows: list[Node], label: str) -> Node | None:
+    for row in rows:
+        if _row_label(row) == label:
+            return row
+    return None
+
+
+def _parse_datetime_row(row: Node | None) -> datetime | None:
+    """Parses a Termin zgłoszeń / Termin odwołań row into a datetime.
+
+    Handles both markup shapes PZT uses for these rows: plain text in
+    .tournAppContentColR_B ("2026-07-31 23:59"), or a
+    .tournAppContentColR_B_p0 table whose first
+    td.tournAppContentTdEntryFee holds
+    "2026-08-03 (poniedziałek)<br>godz. 23:59".
+    """
+    if row is None:
+        return None
+    value_node = _row_value_node(row)
+    if value_node is None:
+        return None
+    table = value_node.css_first("table")
+    if table is not None:
+        cell = table.css_first("td.tournAppContentTdEntryFee")
+        text = cell.text(separator=" ", strip=True) if cell else value_node.text(separator=" ", strip=True)
+    else:
+        text = value_node.text(separator=" ", strip=True)
+    match = _DATETIME_RE.search(text)
+    if not match:
+        logger.warning("Could not parse date/time from row text: %r", text)
+        return None
+    return datetime(
+        int(match.group("year")),
+        int(match.group("month")),
+        int(match.group("day")),
+        int(match.group("hour")),
+        int(match.group("minute")),
+    )
+
+
+def _parse_wojewodztwo(row: Node | None) -> str | None:
+    """Extracts the województwo from the "Miejsce rozgrywek" row.
+
+    That row lists one or more court locations, each ending in
+    "(<województwo>)"; absent entirely on some tournaments. Validated
+    against the 16 real województwa so unrelated parenthesised text never
+    slips through.
+    """
+    if row is None:
+        return None
+    value_node = _row_value_node(row)
+    if value_node is None:
+        return None
+    text = value_node.text(separator=" ", strip=True)
+    for match in _PAREN_RE.finditer(text):
+        candidate = match.group(1).strip().lower()
+        if candidate in WOJEWODZTWA:
+            return candidate
+    return None
+
+
+def _parse_events(row: Node | None) -> list[Event]:
+    if row is None:
+        return []
+    value_node = _row_value_node(row)
+    if value_node is None:
+        return []
     events: list[Event] = []
-    for match in _EVENT_LINE_RE.finditer(text):
-        try:
-            play_type = PlayType.DOUBLES if "podw" in match.group("play_type").lower() else PlayType.SINGLES
-            gender = Gender.BOYS if "opcy" in match.group("gender").lower() else Gender.GIRLS
-        except Exception:
-            logger.warning("Could not classify event line: %r", match.group(0))
+    for tr in value_node.css("tr"):
+        text = re.sub(r"\s+", " ", tr.text(separator=" ", strip=True)).strip()
+        match = _EVENT_LINE_RE.search(text)
+        if not match:
+            logger.warning("Could not parse event row: %r", text)
             continue
+        play_type = PlayType.DOUBLES if "podw" in match.group("play_type").lower() else PlayType.SINGLES
+        gender = Gender.BOYS if "opcy" in match.group("gender").lower() else Gender.GIRLS
         events.append(
             Event(
                 category_label=match.group("category").strip(),
                 play_type=play_type,
                 gender=gender,
                 draw_format=match.group("draw").strip(),
-                raw_text=match.group(0).strip(),
+                raw_text=text,
             )
         )
     return events
 
 
-def _first_group(pattern: re.Pattern, text: str) -> str | None:
-    match = pattern.search(text)
-    if not match:
-        return None
-    value = match.group(1).strip()
-    return value or None
-
-
-def _parse_director(text: str) -> TournamentDirector:
-    match = _DIRECTOR_RE.search(text)
-    if not match:
-        return TournamentDirector()
-    # Director line typically runs "Name, tel. 123456789, email: foo@bar.pl"
-    # up to the next field label or end of line.
-    segment = match.group(1).split("\n", 1)[0]
-    phone_match = _PHONE_RE.search(segment)
-    email_match = _EMAIL_RE.search(segment)
-    name_part = segment
-    for cut in (phone_match, email_match):
-        if cut:
-            name_part = name_part[: cut.start()]
-    name = name_part.strip(" ,;\t") or None
-    return TournamentDirector(
-        name=name,
-        phone=phone_match.group(1).strip() if phone_match else None,
-        email=email_match.group(0).strip() if email_match else None,
-    )
-
-
 def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: str) -> Tournament | None:
-    text = node.text(separator="\n", strip=True)
-    lines = [line.strip() for line in text.split("\n") if line.strip()]
-    text = "\n".join(lines)
+    name_node = node.css_first("div.tournAppName_B")
+    name = name_node.text(strip=True) if name_node else ""
 
-    prefix_match = _TYPE_PREFIX_RE.search(text)
+    prefix_match = _TYPE_PREFIX_RE.search(name)
     if not prefix_match:
-        logger.warning("Tournament block has no recognizable type prefix, skipping: %.80s", text)
+        logger.warning("Tournament block has no recognizable type prefix, skipping: %.80s", name)
         return None
     type_prefix = prefix_match.group(1)
-    name = lines[0] if lines else ""
 
-    date_match = _DATE_RANGE_RE.search(text)
-    date_from = _parse_pzt_date(date_match.group(1)) if date_match else None
-    date_to = _parse_pzt_date(date_match.group(2)) if date_match else None
+    ranga = None
+    ranga_count_node = node.css_first("div.tournAppRangCount")
+    if ranga_count_node is not None:
+        ranga_text = ranga_count_node.text(strip=True)
+        try:
+            ranga = int(ranga_text)
+        except ValueError:
+            logger.warning("Could not parse ranga %r for tournament %r", ranga_text, name)
 
-    entry_deadline_raw = _first_group(_ENTRY_DEADLINE_RE, text)
-    withdrawal_deadline_raw = _first_group(_WITHDRAWAL_DEADLINE_RE, text)
-    court_count_raw = _first_group(_COURT_COUNT_RE, text)
+    date_from = date_to = None
+    date_node = node.css_first("div.tournAppTopCent_B")
+    if date_node is not None:
+        date_match = _DATE_RANGE_RE.search(date_node.text(separator=" ", strip=True))
+        if date_match:
+            date_from = _parse_pzt_date(date_match.group(1))
+            date_to = _parse_pzt_date(date_match.group(2))
 
-    events = _parse_events(text)
+    organiser = None
+    organiser_container = node.css_first("div.tournAppClubName_B")
+    if organiser_container is not None:
+        value_node = organiser_container.css_first(".tournAppPlaceOfGameR_B")
+        organiser = value_node.text(strip=True) if value_node else None
+
+    venue_address = None
+    venue_container = node.css_first("div.tournAppPlaceOfGame_B")
+    if venue_container is not None:
+        value_node = venue_container.css_first(".tournAppPlaceOfGameR_B")
+        venue_address = value_node.text(strip=True) if value_node else None
+
+    rows = node.css("div.tournAppContentRow2_B")
+    entry_deadline = _parse_datetime_row(_find_row(rows, LABEL_TERMIN_ZGLOSZEN))
+    withdrawal_deadline = _parse_datetime_row(_find_row(rows, LABEL_TERMIN_ODWOLAN))
+    wojewodztwo = _parse_wojewodztwo(_find_row(rows, LABEL_MIEJSCE_ROZGRYWEK))
+    events = _parse_events(_find_row(rows, LABEL_ROZGRYWKI))
+
     if not events:
-        logger.warning("Tournament %r has a Rozgrywki block PZT rendered but no events matched", name)
+        logger.warning("Tournament %r has a Rozgrywki row PZT rendered but no events matched", name)
 
     guid = _extract_guid(node)
     if guid is None:
@@ -201,18 +251,14 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
         name=name,
         type_prefix=type_prefix,
         age_category=age_category,
-        ranga=int(m.group(1)) if (m := _RANGA_RE.search(text)) else None,
+        ranga=ranga,
         date_from=date_from,
         date_to=date_to,
-        organiser=_first_group(_ORGANISER_RE, text),
-        venue_address=_first_group(_VENUE_RE, text),
-        wojewodztwo=_first_group(_WOJEWODZTWO_RE, text),
-        entry_deadline=_parse_pzt_date(entry_deadline_raw) if entry_deadline_raw else None,
-        withdrawal_deadline=_parse_pzt_date(withdrawal_deadline_raw) if withdrawal_deadline_raw else None,
-        director=_parse_director(text),
-        entry_fee=_first_group(_ENTRY_FEE_RE, text),
-        court_surface=_first_group(_SURFACE_RE, text),
-        court_count=int(court_count_raw) if court_count_raw else None,
+        organiser=organiser,
+        venue_address=venue_address,
+        wojewodztwo=wojewodztwo,
+        entry_deadline=entry_deadline,
+        withdrawal_deadline=withdrawal_deadline,
         events=events,
         source_url=source_url,
     )
@@ -222,8 +268,8 @@ def find_first_tournament_html(html: str) -> str | None:
     """Returns the raw HTML of the first tournament block on a category page.
 
     Used by `--dump-html` to inspect the exact markup PZT is currently
-    rendering, e.g. when `_LABEL_PATTERNS` stop matching and the parser
-    needs to be updated.
+    rendering, e.g. when selectors stop matching and the parser needs to
+    be updated.
     """
     tree = HTMLParser(html)
     if not tree.root:

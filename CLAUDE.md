@@ -60,10 +60,8 @@ Each page returns upcoming tournaments only. Available fields:
 - `Ranga` (1–7)
 - Dates, format `Od: 2026.08.07 Do: 2026.08.09`
 - Organiser, venue address, województwo
-- `Termin zgłoszeń` — entry deadline (**critical**, see Matching)
+- `Termin zgłoszeń` — entry deadline (drives the 48h reminder, see Matching)
 - `Termin odwołań` — withdrawal deadline
-- Tournament director: name, phone, email
-- Entry fee, court surface, court count
 - `Rozgrywki` block listing events: `Kategoria: … Typ: Gra pojedyncza|Gra podwójna; Chłopcy|Dziewczęta; <draw format>`
 - Tournament GUID, extractable from the results link
 
@@ -114,7 +112,7 @@ The part most likely to break. Be careful here.
 - Maximum **2 outgoing requests** per player per tournament.
 - **First accept wins.** On acceptance, all other outgoing and incoming requests for both players in that event are cancelled with the notice *"Ten zawodnik znalazł już partnera."*
 - **Atomic locking is mandatory.** The match transaction must `SELECT … FOR UPDATE` both search rows, re-verify both are still unmatched, then commit. Without this you will eventually double-book a player and destroy trust in the bot.
-- Requests expire after 24h **or** at `Termin zgłoszeń`, whichever comes first.
+- Requests expire after 24h **or** at 10:00 (Europe/Warsaw) on the tournament start date, whichever comes first. Searches remain open until 10:00 on the tournament start date. `Termin zgłoszeń` is displayed and drives the 48h reminder but does not close a search.
 - Rejection is free and instant; the requester may immediately request someone else.
 
 **Eligibility:** two players may match only if — same tournament, same category, same gender event, and that event contains `Gra podwójna`.
