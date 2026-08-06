@@ -404,6 +404,70 @@ def test_missing_date_from_logs_warning_and_stays_none(caplog):
     assert any("parsed with no date_from" in message for message in caplog.messages)
 
 
+# Mirrors the "_light" header variant PZT renders for tournaments in
+# certain statuses (e.g. tournAppStatusINPROGRESS): every header class gets
+# a "_light" suffix (tournAppTopMain1_B_light, tournAppTopCent_B_light,
+# etc). tournAppTopRightConDate's dDateStart is empty in this variant, so
+# the fallback can't help here — date_from/date_to must come from the
+# prefix-matched tournAppTopCent_B_light block itself.
+TOURNAMENT_LIGHT_HEADER = """
+<div class="tournAppContainer_B">
+  <div class="tournAppTopMain1_B_light">
+    <div class="tournAppTopMain2_B_light">
+      <div class="tournAppTop_B" onclick="ToggleDisplay(7);">
+        <div class="tournAppTopLeft_B_1_light">
+          <div class="tournAppTopLeft_B">
+            <div class="tournAppStatus_B"><div class="tournAppStatusINPROGRESS"></div></div>
+            <div class="tournAppName_B">OTK Turniej w trakcie rozgrywania</div>
+            <div class="tournAppRang_B_main">
+              <div class="tournAppRang_B"><div class="tournAppRangCount">2</div><div class="tournAppRangContent">Ranga</div></div>
+            </div>
+          </div>
+          <div class="tournAppTopCent_B_light">
+            <span style="margin-right: 20px;">Od: 2026.09.14</span>
+            Do: 2026.09.16
+          </div>
+          <div class="tournAppTopRightConDate"></div>
+          <div id="ctl00_dClubName7" class="tournAppClubName_B_light">
+            <div class="tournAppPlaceOfGameL_B">Organizator:</div>
+            <div class="tournAppPlaceOfGameR_B">Klub W Trakcie</div>
+          </div>
+          <div id="ctl00_dPlaceOfGame7" class="tournAppPlaceOfGame_B_light">
+            <div class="tournAppPlaceOfGameL_B">Miejsce turnieju:</div>
+            <div class="tournAppPlaceOfGameR_B">00-001 Warszawa, Testowa 7</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tournAppContent_B" id="d7">
+    <div id="ctl00_dTournDetails7">
+      <div class="tournAppContentRow2_B">
+        <div class="tournAppContentColL_B">Termin zgłoszeń</div>
+        <div class="tournAppContentColR_B">2026-09-01 23:59</div>
+      </div>
+      <div class="tournAppContentRow2_B">
+        <div class="tournAppContentColLBn_B">Rozgrywki</div>
+        <div class="tournAppContentColR_B dtlEvent">
+          <table><tbody>
+            <tr><td><div class="dDtlEventsMainCont1"><span class="tournAppEventsDescLeft">Kategoria: </span>Juniorzy - do 18 lat<br><div class="tournAppEventsDescLeft">Typ: </div><div class="tournAppEventsDescRight">Gra podwójna; Dziewczęta; Grupowo-pucharowy 16</div></div></td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <a href="/TournamentResults.aspx?TournamentID=55667788-99aa-bbcc-ddee-ff0011223344" target="_blank">Szczegóły turnieju</a>
+    </div>
+  </div>
+</div>
+"""
+
+
+def test_light_header_variant_parses_both_dates():
+    tournaments = parse_category_page(TOURNAMENT_LIGHT_HEADER, AgeCategory.JUNIORZY, "https://example/test")
+    t = tournaments[0]
+    assert t.date_from.isoformat() == "2026-09-14"
+    assert t.date_to.isoformat() == "2026-09-16"
+
+
 def test_find_tournament_html_at_returns_block_by_index():
     page = "<html><body>" + TOURNAMENT_WITH_TABLE_ODWOLANIA + TOURNAMENT_PLAIN_ODWOLANIA_NO_WOJEWODZTWO + "</body></html>"
     first = find_tournament_html_at(page, 0)

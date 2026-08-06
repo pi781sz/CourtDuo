@@ -11,6 +11,14 @@ separate court-location table).
 If PZT changes these classes or label wording, `parse_category_page` logs
 and skips the tournament instead of writing partial/garbage data (see
 CLAUDE.md, "Scraping etiquette").
+
+PZT also renders a "_light" variant of the header classes for tournaments
+in certain statuses (e.g. tournAppStatusINPROGRESS): tournAppTopMain1_B,
+tournAppTopMain2_B, tournAppTopLeft_B_1, tournAppTopCent_B,
+tournAppClubName_B, tournAppPlaceOfGame_B, tournAppHideDetails and
+tournAppShowDetails each have a "tournAppXxx_light" counterpart. Header
+elements are matched by class PREFIX (`_find_by_class_prefix`), never by
+exact token, so both variants are caught.
 """
 
 from __future__ import annotations
@@ -95,6 +103,23 @@ def _parse_pzt_date(raw: str) -> date | None:
 
 def _find_tournament_nodes(root: Node) -> list[Node]:
     return root.css(_TOURNAMENT_SELECTOR)
+
+
+def _find_by_class_prefix(node: Node, tag: str, prefix: str) -> Node | None:
+    """Finds the first descendant <tag> with a class token starting with `prefix`.
+
+    PZT renders a "_light" variant of the header classes for tournaments in
+    certain statuses (e.g. tournAppStatusINPROGRESS) — tournAppTopCent_B
+    becomes tournAppTopCent_B_light, tournAppTopMain1_B becomes
+    tournAppTopMain1_B_light, and so on. An exact class selector
+    (`div.tournAppTopCent_B`) misses the _light block entirely, so header
+    elements must be matched by prefix instead of exact token.
+    """
+    for candidate in node.css(tag):
+        classes = (candidate.attributes.get("class") or "").split()
+        if any(cls.startswith(prefix) for cls in classes):
+            return candidate
+    return None
 
 
 def _extract_guid(node: Node) -> str | None:
@@ -235,7 +260,7 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
             logger.warning("Could not parse ranga %r for tournament %r", ranga_text, name)
 
     date_from = date_to = None
-    date_node = node.css_first("div.tournAppTopCent_B")
+    date_node = _find_by_class_prefix(node, "div", "tournAppTopCent_B")
     if date_node is not None:
         date_match = _DATE_RANGE_RE.search(date_node.text(separator=" ", strip=True))
         if date_match:
