@@ -80,11 +80,10 @@ Gender is **not** in the tournament category. It lives inside each event as `Ch�
 
 URL pattern:
 ```
-https://portal.pzt.pl/Ranking.aspx?RCatID={code}&Sort={LP|A}&Year={YYYY}&Month={M}
+https://portal.pzt.pl/Ranking.aspx?RCatID={code}&Sort=A&Year={YYYY}&Month={M}
 ```
 
-- `Sort=LP` — ranked order. Use for a player's ranking position.
-- `Sort=A` — alphabetical roster. **This is the player lookup table for registration.** There is no need to scrape player profile pages.
+Rankings use `Sort=A` (alphabetical roster) only. **This is the player lookup table for registration.** There is no need to scrape player profile pages, and no need to also scrape `Sort=LP` — the alphabetical list already covers every player, and ranking position can be sorted from our own database.
 
 **Do not hardcode or increment Year/Month.** Scrape the index at `https://portal.pzt.pl/Ranking.aspx?RCatID=M` and follow the current *"lista X / YYYY"* links. PZT publishes on the first Wednesday of each month but can be late — guessing the month produces empty pages and silent data loss.
 
@@ -163,7 +162,7 @@ PZT is a national federation, not an API provider. Treat their server with respe
 ## Build order
 
 1. Tournament scraper with doubles-draw detection → database
-2. Ranking scraper, both `LP` and alphabetical → database
+2. Ranking scraper, alphabetical (`Sort=A`) → database
 3. Bot skeleton: `/start`, role selection, player registration
 4. Tournament browsing — doubles events only, next 14 days, sorted by entry deadline
 5. Search creation and the waiting pool
