@@ -1,5 +1,5 @@
 """Standalone runner: scrapes the eight junior ranking lists (Sort=A) and
-prints the result as JSON on stdout. No database involved.
+writes players + ranking rows to the database.
 
 The published (year, month) is always discovered from the ranking index
 first (CLAUDE.md: never hardcode or guess it) — there is no override flag
@@ -8,9 +8,9 @@ for that on purpose.
 Usage:
     python -m scrapers.rankings
     python -m scrapers.rankings --list M12 --list W12
-    python -m scrapers.rankings --pretty
     python -m scrapers.rankings --dump-index-html
     python -m scrapers.rankings --dump-html --list M18 --index 5
+    python -m scrapers.rankings --dry-run --pretty
 """
 
 from __future__ import annotations
@@ -22,6 +22,8 @@ import logging
 import sys
 
 from core.http import build_client
+from db.crud import store_ranking_entries
+from db.session import get_session_factory
 
 from .models import RankingList
 from .parser import find_entry_html_at
@@ -37,7 +39,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         choices=[rl.code for rl in RankingList],
         help="Ranking list code to scrape (repeatable). Defaults to all eight.",
     )
-    parser.add_argument("--pretty", action="store_true", help="Pretty-print the JSON output.")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print scraped ranking entries as JSON on stdout instead of writing to the database. No DATABASE_URL needed.",
+    )
+    parser.add_argument("--pretty", action="store_true", help="With --dry-run, pretty-print the JSON output.")
     parser.add_argument(
         "--dump-html",
         action="store_true",
@@ -102,15 +109,34 @@ async def _run(args: argparse.Namespace) -> int:
         return 1
     year, month, entries = result
 
-    payload = {
-        "year": year,
-        "month": month,
-        "entries": [e.to_dict() for e in entries],
-    }
-    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2 if args.pretty else None)
-    sys.stdout.write("\n")
+    if args.dry_run:
+        payload = {
+            "year": year,
+            "month": month,
+            "entries": [e.to_dict() for e in entries],
+        }
+        json.dump(payload, sys.stdout, ensure_ascii=False, indent=2 if args.pretty else None)
+        sys.stdout.write("\n")
+        logging.info(
+            "Scraped %d ranking entries total for %d/%d [dry-run, not written to the database]",
+            len(entries),
+            month,
+            year,
+        )
+        return 0
 
-    logging.info("Scraped %d ranking entries total for %d/%d", len(entries), month, year)
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        written = await store_ranking_entries(session, entries)
+        await session.commit()
+
+    logging.info(
+        "Scraped %d ranking entries for %d/%d, wrote %d to the database",
+        len(entries),
+        month,
+        year,
+        written,
+    )
     return 0
 
 

@@ -1,13 +1,12 @@
 """Standalone runner: scrapes the four junior tournament categories and
-prints the result as JSON on stdout. No database involved.
+writes tournaments + events to the database.
 
 Usage:
     python -m scrapers.tournaments
     python -m scrapers.tournaments --category 12 --category 14
-    python -m scrapers.tournaments --doubles-only
-    python -m scrapers.tournaments --pretty
     python -m scrapers.tournaments --dump-html
     python -m scrapers.tournaments --category 18 --dump-html --index 5
+    python -m scrapers.tournaments --dry-run --doubles-only --pretty
 """
 
 from __future__ import annotations
@@ -19,6 +18,8 @@ import logging
 import sys
 
 from core.http import build_client
+from db.crud import store_tournaments
+from db.session import get_session_factory
 
 from .models import AgeCategory
 from .parser import find_tournament_html_at
@@ -26,7 +27,7 @@ from .scraper import fetch_category_html, scrape_all
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument(
         "--category",
         type=int,
@@ -35,11 +36,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="CategoryID to scrape (repeatable). Defaults to all four.",
     )
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print scraped tournaments as JSON on stdout instead of writing to the database. No DATABASE_URL needed.",
+    )
+    parser.add_argument(
         "--doubles-only",
         action="store_true",
-        help="Only include tournaments that have at least one Gra podwójna event.",
+        help="With --dry-run, only include tournaments that have at least one Gra podwójna event.",
     )
-    parser.add_argument("--pretty", action="store_true", help="Pretty-print the JSON output.")
+    parser.add_argument("--pretty", action="store_true", help="With --dry-run, pretty-print the JSON output.")
     parser.add_argument(
         "--dump-html",
         action="store_true",
@@ -81,17 +87,30 @@ async def _run(args: argparse.Namespace) -> int:
 
     tournaments = await scrape_all(categories)
 
-    if args.doubles_only:
-        tournaments = [t for t in tournaments if t.has_doubles]
+    if args.dry_run:
+        payload_tournaments = tournaments
+        if args.doubles_only:
+            payload_tournaments = [t for t in payload_tournaments if t.has_doubles]
+        payload = [t.to_dict() for t in payload_tournaments]
+        json.dump(payload, sys.stdout, ensure_ascii=False, indent=2 if args.pretty else None)
+        sys.stdout.write("\n")
+        logging.info(
+            "Scraped %d tournaments (%d with doubles events) [dry-run, not written to the database]",
+            len(payload),
+            sum(1 for t in payload_tournaments if t.has_doubles),
+        )
+        return 0
 
-    payload = [t.to_dict() for t in tournaments]
-    json.dump(payload, sys.stdout, ensure_ascii=False, indent=2 if args.pretty else None)
-    sys.stdout.write("\n")
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        written, doubles_events = await store_tournaments(session, tournaments)
+        await session.commit()
 
     logging.info(
-        "Scraped %d tournaments (%d with doubles events)",
-        len(payload),
-        sum(1 for t in tournaments if t.has_doubles),
+        "Scraped %d tournaments, wrote %d to the database (%d doubles events)",
+        len(tournaments),
+        written,
+        doubles_events,
     )
     return 0
 

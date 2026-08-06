@@ -18,11 +18,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run tournament scraper (U18, pretty JSON)
-        run: python -m scrapers.tournaments --category 18 --pretty
+      - name: Run tournament scraper (U18, pretty JSON, dry-run)
+        run: python -m scrapers.tournaments --category 18 --dry-run --pretty
 
       - name: Dump first tournament block HTML (U18)
         run: python -m scrapers.tournaments --category 18 --dump-html
 
-      - name: Run ranking scraper (all eight lists, pretty JSON)
-        run: python -m scrapers.rankings --pretty
+      - name: Run ranking scraper (all eight lists, pretty JSON, dry-run)
+        run: python -m scrapers.rankings --dry-run --pretty
