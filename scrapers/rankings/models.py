@@ -13,6 +13,11 @@ Sort=A (alphabetical) is the player lookup table used for registration
 `position`. Sort=LP (ranked order) is where `position` comes from. Both
 are scraped for every list; RankingEntry.sort records which one produced
 a given row.
+
+`itf_note` holds an ITF ranking badge PZT sometimes renders next to a
+player's name (see scrapers.rankings.parser) — kept separate from
+`full_name` rather than discarded since it's cheap to carry along, but
+it is not itself validated/parsed into a structured value.
 """
 
 from __future__ import annotations
@@ -69,6 +74,7 @@ class RankingEntry:
     position: int | None
     points: int | None
     birth_year: int | None
+    itf_note: str | None
     source_url: str
 
     def to_dict(self) -> dict:
@@ -85,5 +91,6 @@ class RankingEntry:
             "position": self.position,
             "points": self.points,
             "birth_year": self.birth_year,
+            "itf_note": self.itf_note,
             "source_url": self.source_url,
         }
