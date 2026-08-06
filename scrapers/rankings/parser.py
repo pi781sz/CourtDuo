@@ -1,4 +1,4 @@
-"""Parses PZT ranking pages (Ranking.aspx?RCatID=...) and the ranking index.
+"""Parses PZT ranking pages (Ranking.aspx?RCatID=...&Sort=A) and the ranking index.
 
 Unlike scrapers.tournaments.parser, these selectors were NOT verified
 against a live fetch — this environment has no network path to
@@ -8,25 +8,18 @@ that has been re-confirmed: the agent egress proxy returns a policy
 a result:
 
 - The ranking table itself is found by matching its header row's TEXT
-  against known Polish column labels ("Zawodnik", "Klub", "Pkt", ...),
-  not by CSS class. This sidesteps the exact problem CLAUDE.md flags for
-  the tournament page — PZT rendering a "_light" (or any other) class
+  against known Polish column labels ("Zawodnik", "Klub", ...), not by
+  CSS class. This sidesteps the exact problem CLAUDE.md flags for the
+  tournament page — PZT rendering a "_light" (or any other) class
   variant — because no class name is involved in locating the table at
   all. If PZT wraps the real table in extra markup this still won't find
   it, which is what --dump-html / --dump-index-html are for (see
   __main__.py): run them against the live page and adjust
   _HEADER_FIELD_SYNONYMS / _find_ranking_table accordingly.
-- `_find_ranking_table` no longer assumes the header row is exactly
+- `_find_ranking_table` does not assume the header row is exactly
   `rows[0]` of the table — it scans the first few rows of each table for
-  one that maps known columns. This is the header-matching analogue of
-  the tournament parser's class-*prefix* matching for "_light" variants:
-  match leniently by pattern/position instead of a rigid exact index, so
-  a leading caption/title row PZT renders only on some views (this is
-  the working theory for why Sort=LP was reported as returning "No
-  ranking table found" while Sort=A on the same list works) doesn't
-  blank out detection. This still could not be verified against a live
-  Sort=LP fetch for the reason above — if it turns out to be wrong,
-  --dump-html against the real page is the way to correct it.
+  one that maps known columns, so a leading caption/title row PZT may
+  render on some views doesn't blank out detection.
 - The player-name cell also gets the same treatment for a different
   reason: PZT apparently renders an ITF ranking badge as a further
   descendant of the same name link (e.g. "Błuś Aleksander" plus a nested
@@ -56,7 +49,7 @@ from urllib.parse import unquote
 
 from selectolax.parser import HTMLParser, Node
 
-from .models import RankingEntry, RankingList, Sort
+from .models import RankingEntry, RankingList
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +60,8 @@ _ID_PARAM_RE = re.compile(r"[?&][A-Za-z]*[Ii][Dd]=([^&#\"']+)")
 # Column header text -> field name. Matched case-insensitively after
 # whitespace normalization and stripping trailing "." / ":". Kept as sets
 # of known PZT synonyms rather than a single guessed label per field,
-# since Sort=LP and Sort=A pages are not assumed to use identical wording.
-# points/birth_year synonyms are widened defensively (could not be checked
-# against a live header row — see module docstring); if a real page uses
-# wording outside these sets the column is simply left unmapped rather than
+# since page wording is not assumed exact. If a real page uses wording
+# outside these sets the column is simply left unmapped rather than
 # silently mis-mapped, and the unmatched header text is logged at DEBUG.
 _HEADER_FIELD_SYNONYMS: dict[str, set[str]] = {
     "position": {"l.p.", "l.p", "lp", "poz", "poz.", "pozycja", "miejsce"},
@@ -85,17 +76,6 @@ _HEADER_FIELD_SYNONYMS: dict[str, set[str]] = {
         "gracz",
     },
     "club": {"klub"},
-    "points": {"pkt", "pkt.", "punkty", "suma pkt", "suma punktów", "punkty rankingowe", "suma punktów rankingowych"},
-    "birth_year": {
-        "rok ur.",
-        "rok ur",
-        "rok urodzenia",
-        "ur.",
-        "rocznik",
-        "r.ur.",
-        "r. ur.",
-        "rok",
-    },
 }
 
 # Sort-order indicator characters PZT (or a browser rendering it) may
@@ -218,23 +198,10 @@ def _parse_int(raw: str) -> int | None:
     return int(match.group(0))
 
 
-def _parse_points(raw: str) -> int | float | None:
-    text = raw.strip().replace("\xa0", "").replace(" ", "")
-    if not text:
-        return None
-    text = text.replace(",", ".")
-    try:
-        value = float(text)
-    except ValueError:
-        return None
-    return int(value) if value.is_integer() else value
-
-
 def _parse_row(
     row: Node,
     mapping: dict[int, str],
     ranking_list: RankingList,
-    sort: Sort,
     year: int,
     month: int,
     source_url: str,
@@ -261,20 +228,15 @@ def _parse_row(
     pzt_id = values.get("pzt_id") or _extract_pzt_id_from_row(row)
     club = _normalize(values["club"]) if values.get("club") else None
     position = _parse_int(values["position"]) if values.get("position") else None
-    points = _parse_points(values["points"]) if values.get("points") else None
-    birth_year = _parse_int(values["birth_year"]) if values.get("birth_year") else None
 
     return RankingEntry(
         ranking_list=ranking_list,
-        sort=sort,
         year=year,
         month=month,
         full_name=full_name,
         pzt_id=pzt_id,
         club=club,
         position=position,
-        points=points,
-        birth_year=birth_year,
         itf_note=itf_note,
         source_url=source_url,
     )
@@ -308,12 +270,11 @@ def parse_ranking_index(html: str) -> tuple[int, int] | None:
 def parse_ranking_page(
     html: str,
     ranking_list: RankingList,
-    sort: Sort,
     year: int,
     month: int,
     source_url: str,
 ) -> list[RankingEntry]:
-    """Parses one Ranking.aspx?RCatID=...&Sort=... page into RankingEntry rows."""
+    """Parses one Ranking.aspx?RCatID=...&Sort=A page into RankingEntry rows."""
     tree = HTMLParser(html)
     if not tree.root:
         logger.error("Ranking page failed to parse (%s) — empty document", source_url)
@@ -322,9 +283,8 @@ def parse_ranking_page(
     found = _find_ranking_table(tree.root)
     if found is None:
         logger.error(
-            "No ranking table found for %s Sort=%s %d/%d (%s) — page shape may have changed",
+            "No ranking table found for %s %d/%d (%s) — page shape may have changed",
             ranking_list.code,
-            sort.value,
             month,
             year,
             source_url,
@@ -334,20 +294,16 @@ def parse_ranking_page(
     _, mapping, data_rows = found
     entries = []
     for row in data_rows:
-        entry = _parse_row(row, mapping, ranking_list, sort, year, month, source_url)
+        entry = _parse_row(row, mapping, ranking_list, year, month, source_url)
         if entry is None:
             text = row.text(strip=True)
             if text:
-                logger.warning(
-                    "Could not parse ranking row for %s Sort=%s: %.120r", ranking_list.code, sort.value, text
-                )
+                logger.warning("Could not parse ranking row for %s: %.120r", ranking_list.code, text)
             continue
         entries.append(entry)
 
     if not entries:
-        logger.warning(
-            "Ranking table found but zero entries parsed for %s Sort=%s %d/%d", ranking_list.code, sort.value, month, year
-        )
+        logger.warning("Ranking table found but zero entries parsed for %s %d/%d", ranking_list.code, month, year)
     return entries
 
 

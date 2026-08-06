@@ -8,11 +8,12 @@ which is how CourtDuo picks a list for a given tournament event. Kept as
 its own enum here so scrapers.rankings has no import-time dependency on
 the tournament scraper.
 
-Sort=A (alphabetical) is the player lookup table used for registration
-(see CLAUDE.md, "Registration flow") — it has no meaningful ranking
-`position`. Sort=LP (ranked order) is where `position` comes from. Both
-are scraped for every list; RankingEntry.sort records which one produced
-a given row.
+Only the alphabetical roster (Sort=A) is scraped — it's the player lookup
+table used for registration (see CLAUDE.md, "Registration flow") and
+already carries every player, so ranking position can be sorted from our
+own database rather than fetched separately via Sort=LP.
+
+`points` and `birth_year` are not scraped: confirmed absent from the page.
 
 `itf_note` holds an ITF ranking badge PZT sometimes renders next to a
 player's name (see scrapers.rankings.parser) — kept separate from
@@ -24,11 +25,6 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-
-
-class Sort(enum.Enum):
-    RANKED = "LP"
-    ALPHABETICAL = "A"
 
 
 class RankingList(enum.Enum):
@@ -49,11 +45,8 @@ class RankingList(enum.Enum):
         obj.gender_label = gender_label
         return obj
 
-    def url(self, sort: Sort, year: int, month: int) -> str:
-        return (
-            f"https://portal.pzt.pl/Ranking.aspx?RCatID={self.code}"
-            f"&Sort={sort.value}&Year={year}&Month={month}"
-        )
+    def url(self, year: int, month: int) -> str:
+        return f"https://portal.pzt.pl/Ranking.aspx?RCatID={self.code}&Sort=A&Year={year}&Month={month}"
 
 
 # PZT's index page for discovering the currently published list. Any
@@ -65,15 +58,12 @@ RANKING_INDEX_URL = "https://portal.pzt.pl/Ranking.aspx?RCatID=M"
 @dataclass
 class RankingEntry:
     ranking_list: RankingList
-    sort: Sort
     year: int
     month: int
     full_name: str
     pzt_id: str | None
     club: str | None
     position: int | None
-    points: int | None
-    birth_year: int | None
     itf_note: str | None
     source_url: str
 
@@ -82,15 +72,12 @@ class RankingEntry:
             "ranking_list": self.ranking_list.code,
             "age_category": self.ranking_list.age_category_label,
             "gender": self.ranking_list.gender_label,
-            "sort": self.sort.value,
             "year": self.year,
             "month": self.month,
             "full_name": self.full_name,
             "pzt_id": self.pzt_id,
             "club": self.club,
             "position": self.position,
-            "points": self.points,
-            "birth_year": self.birth_year,
             "itf_note": self.itf_note,
             "source_url": self.source_url,
         }

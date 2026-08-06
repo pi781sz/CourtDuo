@@ -1,6 +1,5 @@
-"""Standalone runner: scrapes the eight junior ranking lists (Sort=LP and
-Sort=A each) and prints the result as JSON on stdout. No database
-involved.
+"""Standalone runner: scrapes the eight junior ranking lists (Sort=A) and
+prints the result as JSON on stdout. No database involved.
 
 The published (year, month) is always discovered from the ranking index
 first (CLAUDE.md: never hardcode or guess it) — there is no override flag
@@ -9,10 +8,9 @@ for that on purpose.
 Usage:
     python -m scrapers.rankings
     python -m scrapers.rankings --list M12 --list W12
-    python -m scrapers.rankings --sort LP
     python -m scrapers.rankings --pretty
     python -m scrapers.rankings --dump-index-html
-    python -m scrapers.rankings --dump-html --list M18 --sort A --index 5
+    python -m scrapers.rankings --dump-html --list M18 --index 5
 """
 
 from __future__ import annotations
@@ -25,7 +23,7 @@ import sys
 
 from core.http import build_client
 
-from .models import RankingList, Sort
+from .models import RankingList
 from .parser import find_entry_html_at
 from .scraper import discover_current_period, fetch_index_html, fetch_ranking_list_html, scrape_all_entries
 
@@ -39,20 +37,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         choices=[rl.code for rl in RankingList],
         help="Ranking list code to scrape (repeatable). Defaults to all eight.",
     )
-    parser.add_argument(
-        "--sort",
-        dest="sorts",
-        action="append",
-        choices=[s.value for s in Sort],
-        help="Sort order to scrape (repeatable): LP (ranked) and/or A (alphabetical). Defaults to both.",
-    )
     parser.add_argument("--pretty", action="store_true", help="Pretty-print the JSON output.")
     parser.add_argument(
         "--dump-html",
         action="store_true",
         help=(
             "Print the raw HTML of a ranking row on a single list page (from the "
-            "first requested/default --list and --sort) to stdout instead of JSON. "
+            "first requested/default --list) to stdout instead of JSON. "
             "For debugging when the page shape changes."
         ),
     )
@@ -73,7 +64,6 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 async def _run(args: argparse.Namespace) -> int:
     ranking_lists = [RankingList(c) for c in args.lists] if args.lists else None
-    sorts = [Sort(s) for s in args.sorts] if args.sorts else None
 
     if args.dump_index_html:
         async with build_client() as client:
@@ -84,22 +74,20 @@ async def _run(args: argparse.Namespace) -> int:
 
     if args.dump_html:
         ranking_list = ranking_lists[0] if ranking_lists else next(iter(RankingList))
-        sort = sorts[0] if sorts else Sort.RANKED
         async with build_client() as client:
             period = await discover_current_period(client)
             if period is None:
                 logging.error("Could not discover the current ranking period — cannot dump a list page")
                 return 1
             year, month = period
-            html = await fetch_ranking_list_html(client, ranking_list, sort, year, month)
+            html = await fetch_ranking_list_html(client, ranking_list, year, month)
         row_html = find_entry_html_at(html, args.index)
         if row_html is None:
             logging.error(
-                "No ranking row at index %d for %s Sort=%s %d/%d — page shape may have changed, "
+                "No ranking row at index %d for %s %d/%d — page shape may have changed, "
                 "or the list has fewer rows than that",
                 args.index,
                 ranking_list.code,
-                sort.value,
                 month,
                 year,
             )
@@ -108,7 +96,7 @@ async def _run(args: argparse.Namespace) -> int:
         sys.stdout.write("\n")
         return 0
 
-    result = await scrape_all_entries(ranking_lists, sorts)
+    result = await scrape_all_entries(ranking_lists)
     if result is None:
         logging.error("Could not discover the current ranking period — nothing scraped")
         return 1
@@ -122,7 +110,7 @@ async def _run(args: argparse.Namespace) -> int:
     json.dump(payload, sys.stdout, ensure_ascii=False, indent=2 if args.pretty else None)
     sys.stdout.write("\n")
 
-    logging.info("Scraped %d ranking entries for %d/%d", len(entries), month, year)
+    logging.info("Scraped %d ranking entries total for %d/%d", len(entries), month, year)
     return 0
 
 
