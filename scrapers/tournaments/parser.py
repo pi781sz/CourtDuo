@@ -34,6 +34,12 @@ _GUID_RE = re.compile(
 
 _DATE_RANGE_RE = re.compile(r"Od:\s*(\d{4}\.\d{2}\.\d{2})\s*Do:\s*(\d{4}\.\d{2}\.\d{2})")
 
+# Fallback source for date_from: div.tournAppTopRightConDate renders
+# "Turniej gł.: 2026-08-07" (ISO, start date only) and is present even on
+# the handful of tournaments where tournAppTopCent_B's Od:/Do: block
+# doesn't parse (see _parse_tournament_block).
+_FALLBACK_DATE_FROM_RE = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
+
 _DATETIME_RE = re.compile(
     r"(?P<year>\d{4})-(?P<month>\d{2})-(?P<day>\d{2}).*?(?P<hour>\d{2}):(?P<minute>\d{2})"
 )
@@ -45,6 +51,12 @@ _EVENT_LINE_RE = re.compile(
 )
 
 _PAREN_RE = re.compile(r"\(([^)]+)\)")
+
+# draw_format sometimes runs into trailing remarks PZT renders in the same
+# cell ("Uwagi: ...", a following "Turniej główny" phase, or a "Losowanie"
+# note) with no separator the regex above can key on. Cut at the earliest
+# of these markers (or a literal newline) instead.
+_DRAW_FORMAT_CUT_MARKERS = ("Uwagi:", "Turniej główny", "Losowanie", "\n")
 
 WOJEWODZTWA = {
     "dolnośląskie",
@@ -167,6 +179,15 @@ def _parse_wojewodztwo(row: Node | None) -> str | None:
     return None
 
 
+def _truncate_draw_format(raw: str) -> str:
+    cut_at = len(raw)
+    for marker in _DRAW_FORMAT_CUT_MARKERS:
+        idx = raw.find(marker)
+        if idx != -1:
+            cut_at = min(cut_at, idx)
+    return raw[:cut_at].strip()
+
+
 def _parse_events(row: Node | None) -> list[Event]:
     if row is None:
         return []
@@ -187,7 +208,7 @@ def _parse_events(row: Node | None) -> list[Event]:
                 category_label=match.group("category").strip(),
                 play_type=play_type,
                 gender=gender,
-                draw_format=match.group("draw").strip(),
+                draw_format=_truncate_draw_format(match.group("draw").strip()),
                 raw_text=text,
             )
         )
@@ -221,17 +242,25 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
             date_from = _parse_pzt_date(date_match.group(1))
             date_to = _parse_pzt_date(date_match.group(2))
 
-    organiser = None
-    organiser_container = node.css_first("div.tournAppClubName_B")
-    if organiser_container is not None:
-        value_node = organiser_container.css_first(".tournAppPlaceOfGameR_B")
-        organiser = value_node.text(strip=True) if value_node else None
+    if date_from is None:
+        fallback_node = node.css_first("div.tournAppTopRightConDate")
+        fallback_match = (
+            _FALLBACK_DATE_FROM_RE.search(fallback_node.text(separator=" ", strip=True))
+            if fallback_node is not None
+            else None
+        )
+        if fallback_match:
+            logger.warning(
+                "tournAppTopCent_B Od:/Do: block missing or unparsable for tournament %r; "
+                "falling back to tournAppTopRightConDate for date_from",
+                name,
+            )
+            date_from = date(
+                int(fallback_match.group(1)), int(fallback_match.group(2)), int(fallback_match.group(3))
+            )
 
-    venue_address = None
-    venue_container = node.css_first("div.tournAppPlaceOfGame_B")
-    if venue_container is not None:
-        value_node = venue_container.css_first(".tournAppPlaceOfGameR_B")
-        venue_address = value_node.text(strip=True) if value_node else None
+    if date_from is None:
+        logger.warning("Tournament %r parsed with no date_from (primary and fallback both failed)", name)
 
     rows = node.css("div.tournAppContentRow2_B")
     entry_deadline = _parse_datetime_row(_find_row(rows, LABEL_TERMIN_ZGLOSZEN))
@@ -254,8 +283,6 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
         ranga=ranga,
         date_from=date_from,
         date_to=date_to,
-        organiser=organiser,
-        venue_address=venue_address,
         wojewodztwo=wojewodztwo,
         entry_deadline=entry_deadline,
         withdrawal_deadline=withdrawal_deadline,
@@ -264,18 +291,21 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
     )
 
 
-def find_first_tournament_html(html: str) -> str | None:
-    """Returns the raw HTML of the first tournament block on a category page.
+def find_tournament_html_at(html: str, index: int = 0) -> str | None:
+    """Returns the raw HTML of the tournament block at `index` on a category page.
 
-    Used by `--dump-html` to inspect the exact markup PZT is currently
-    rendering, e.g. when selectors stop matching and the parser needs to
-    be updated.
+    Used by `--dump-html --index N` to inspect the exact markup PZT is
+    currently rendering for a specific tournament (0-based, in page
+    order), e.g. when selectors stop matching and the parser needs to be
+    updated.
     """
     tree = HTMLParser(html)
     if not tree.root:
         return None
     nodes = _find_tournament_nodes(tree.root)
-    return nodes[0].html if nodes else None
+    if not 0 <= index < len(nodes):
+        return None
+    return nodes[index].html
 
 
 def parse_category_page(html: str, age_category: AgeCategory, source_url: str) -> list[Tournament]:

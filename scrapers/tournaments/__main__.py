@@ -7,6 +7,7 @@ Usage:
     python -m scrapers.tournaments --doubles-only
     python -m scrapers.tournaments --pretty
     python -m scrapers.tournaments --dump-html
+    python -m scrapers.tournaments --category 18 --dump-html --index 5
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ import sys
 from core.http import build_client
 
 from .models import AgeCategory
-from .parser import find_first_tournament_html
+from .parser import find_tournament_html_at
 from .scraper import fetch_category_html, scrape_all
 
 
@@ -43,10 +44,16 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--dump-html",
         action="store_true",
         help=(
-            "Print the raw HTML of the first tournament block on the page "
-            "(from the first requested/default category) to stdout instead "
-            "of JSON. For debugging when the page shape changes."
+            "Print the raw HTML of a tournament block on the page (from the "
+            "first requested/default category) to stdout instead of JSON. "
+            "For debugging when the page shape changes."
         ),
+    )
+    parser.add_argument(
+        "--index",
+        type=int,
+        default=0,
+        help="0-based position of the tournament block to dump with --dump-html (default: 0, the first).",
     )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging on stderr.")
     return parser.parse_args(argv)
@@ -59,9 +66,14 @@ async def _run(args: argparse.Namespace) -> int:
         category = categories[0] if categories else next(iter(AgeCategory))
         async with build_client() as client:
             html = await fetch_category_html(client, category)
-        block_html = find_first_tournament_html(html)
+        block_html = find_tournament_html_at(html, args.index)
         if block_html is None:
-            logging.error("No tournament block found for %s — page shape may have changed", category.label)
+            logging.error(
+                "No tournament block at index %d for %s — page shape may have changed, "
+                "or the category has fewer tournaments than that",
+                args.index,
+                category.label,
+            )
             return 1
         sys.stdout.write(block_html)
         sys.stdout.write("\n")
