@@ -1,1 +1,47 @@
-{}
+{
+  "commands": {
+    "start": "Zacznij i dodaj zawodnika",
+    "moi_zawodnicy": "Twoi zawodnicy"
+  },
+  "start": {
+    "greeting": "Cześć! 👋 CourtDuo pomaga młodym zawodnikom PZT znaleźć partnera do gry podwójnej na turnieje.",
+    "greeting_returning": "Cześć ponownie!",
+    "ask_role": "Kim jesteś dla zawodnika, którego chcesz dodać?",
+    "ask_player_name": "Podaj imię i nazwisko zawodnika, którego chcesz dodać."
+  },
+  "role": {
+    "rodzic": "Rodzic",
+    "opiekun": "Opiekun",
+    "trener": "Trener"
+  },
+  "registration": {
+    "no_matches": "Nie znaleziono zawodnika o takim imieniu i nazwisku. Spróbuj ponownie.",
+    "choose_player": "Znaleziono następujących zawodników. Wybierz właściwego:",
+    "player_option": "{name} — {club} ({position})",
+    "player_group_option": "{name} ({count} zawodników — wybierz po ID PZT)",
+    "choose_by_id": "Kilku zawodników nosi to samo imię i nazwisko. Wybierz właściwego po ID PZT:",
+    "player_option_with_id": "{name} — {club} ({position}) — ID PZT: {pzt_id}",
+    "linked": "Zawodnik {name} został dodany do Twojego konta. ✅",
+    "what_next": "Co dalej?",
+    "add_another": "➕ Dodaj kolejnego zawodnika",
+    "done": "✅ Gotowe",
+    "finished": "Gotowe! Możesz zarządzać swoimi zawodnikami komendą /moi_zawodnicy.",
+    "position_known": "{position}. w rankingu",
+    "position_unknown": "brak rankingu w bazie",
+    "expired_selection": "Ta lista już wygasła. Wpisz imię i nazwisko ponownie."
+  },
+  "my_players": {
+    "title": "Twoi zawodnicy:",
+    "empty": "Nie masz jeszcze żadnych dodanych zawodników. Użyj /start, aby dodać pierwszego.",
+    "remove_button": "🗑 Usuń: {name}",
+    "confirm_remove": "Czy na pewno chcesz usunąć zawodnika {name} z Twojego konta?",
+    "confirm_yes": "Tak, usuń",
+    "confirm_no": "Anuluj",
+    "removed": "Zawodnik {name} został usunięty z Twojego konta.",
+    "remove_cancelled": "Anulowano.",
+    "no_account": "Najpierw użyj /start, aby założyć konto."
+  },
+  "common": {
+    "unknown_club": "brak klubu"
+  }
+}

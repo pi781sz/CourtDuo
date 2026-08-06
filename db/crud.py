@@ -10,17 +10,18 @@ Because db.models.enums re-exports the scrapers' own AgeCategory/Gender/
 PlayType/RankingList enums, a scraped dataclass's enum fields pass
 straight into a mapped column with no translation step.
 
-No bot logic lives here beyond can_start_search, the one entitlement
-check CLAUDE.md's "Monetisation" section asks to be routed through from
-day one — everything else in the matching engine is bot code, out of
-scope for this task.
+No bot logic lives here beyond straightforward persistence: can_start_search
+(the entitlement check CLAUDE.md's "Monetisation" section asks to be
+routed through from day one) and the account/player-link CRUD that
+registration needs. The matching engine itself (search/request/match
+transactions) is bot code, out of scope for this task.
 """
 
 from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,7 +29,18 @@ from scrapers.rankings.models import RankingEntry as ScrapedRankingEntry
 from scrapers.tournaments.models import Event as ScrapedEvent
 from scrapers.tournaments.models import Tournament as ScrapedTournament
 
-from .models import Account, AgeCategory, Event, Gender, Player, Ranking, RankingList, Tournament
+from .models import (
+    Account,
+    AccountPlayer,
+    AccountRole,
+    AgeCategory,
+    Event,
+    Gender,
+    Player,
+    Ranking,
+    RankingList,
+    Tournament,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +209,64 @@ async def get_latest_ranking_period(session: AsyncSession, ranking_list: Ranking
     )
     row = result.first()
     return (row.year, row.month) if row else None
+
+
+async def get_account_by_telegram_id(session: AsyncSession, telegram_id: int) -> Account | None:
+    result = await session.execute(select(Account).where(Account.telegram_id == telegram_id))
+    return result.scalar_one_or_none()
+
+
+async def get_or_create_account(session: AsyncSession, telegram_id: int, role: AccountRole) -> Account:
+    """Creates the account row on first /start (CLAUDE.md, "Accounts
+    belong to adults"). Returns the existing account unchanged if the
+    adult has already registered — /start never overwrites a previously
+    chosen role.
+    """
+    account = await get_account_by_telegram_id(session, telegram_id)
+    if account is not None:
+        return account
+    account = Account(telegram_id=telegram_id, role=role)
+    session.add(account)
+    await session.flush()
+    return account
+
+
+async def link_player_to_account(session: AsyncSession, account_id: int, player_pzt_id: str) -> None:
+    stmt = insert(AccountPlayer).values(account_id=account_id, player_pzt_id=player_pzt_id)
+    stmt = stmt.on_conflict_do_nothing(index_elements=[AccountPlayer.account_id, AccountPlayer.player_pzt_id])
+    await session.execute(stmt)
+
+
+async def unlink_player_from_account(session: AsyncSession, account_id: int, player_pzt_id: str) -> None:
+    stmt = delete(AccountPlayer).where(
+        AccountPlayer.account_id == account_id, AccountPlayer.player_pzt_id == player_pzt_id
+    )
+    await session.execute(stmt)
+
+
+async def list_account_players(session: AsyncSession, account_id: int) -> list[Player]:
+    result = await session.execute(
+        select(Player)
+        .join(AccountPlayer, AccountPlayer.player_pzt_id == Player.pzt_id)
+        .where(AccountPlayer.account_id == account_id)
+        .order_by(Player.full_name)
+    )
+    return list(result.scalars().all())
+
+
+async def get_player_by_pzt_id(session: AsyncSession, pzt_id: str) -> Player | None:
+    result = await session.execute(select(Player).where(Player.pzt_id == pzt_id))
+    return result.scalar_one_or_none()
+
+
+async def get_latest_ranking_for_player(session: AsyncSession, pzt_id: str) -> Ranking | None:
+    result = await session.execute(
+        select(Ranking)
+        .where(Ranking.player_pzt_id == pzt_id)
+        .order_by(Ranking.year.desc(), Ranking.month.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def can_start_search(account: Account, tournament: Tournament) -> bool:
