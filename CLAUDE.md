@@ -59,7 +59,7 @@ Each page returns upcoming tournaments only. Available fields:
 - Name and type prefix (`OTK`, `WTK`, `MW`, `OTK SS`)
 - `Ranga` (1–7)
 - Dates, format `Od: 2026.08.07 Do: 2026.08.09`
-- Organiser, venue address, województwo
+- Województwo
 - `Termin zgłoszeń` — entry deadline (drives the 48h reminder, see Matching)
 - `Termin odwołań` — withdrawal deadline
 - `Rozgrywki` block listing events: `Kategoria: … Typ: Gra pojedyncza|Gra podwójna; Chłopcy|Dziewczęta; <draw format>`

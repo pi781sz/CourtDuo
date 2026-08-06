@@ -2,8 +2,8 @@
 
 The HTML fixtures below reproduce the actual CSS classes/structure PZT
 renders on Tournament.aspx?CategoryID=... (verified against a live fetch),
-trimmed to the fields CourtDuo keeps and with organiser/venue details
-genericised. No player names appear anywhere in this file.
+trimmed to the fields CourtDuo keeps. No player names appear anywhere in
+this file.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from scrapers.tournaments.models import AgeCategory, Gender, PlayType, Tournament
-from scrapers.tournaments.parser import parse_category_page
+from scrapers.tournaments.parser import find_tournament_html_at, parse_category_page
 
 # Mirrors a real tournament block: Termin odwołań as a table
 # (.tournAppContentColR_B_p0 / td.tournAppContentTdEntryFee), a
@@ -168,8 +168,6 @@ def test_first_tournament_fields():
     assert t.ranga == 3
     assert t.date_from.isoformat() == "2026-08-07"
     assert t.date_to.isoformat() == "2026-08-09"
-    assert t.organiser == "Klub Tenisowy Testowy"
-    assert t.venue_address == "65-001 Zielona Gora, Testowa 1"
     assert t.wojewodztwo == "lubuskie"
     assert t.guid == "C949F78A-765D-4A49-8D2B-18267DB752F3"
 
@@ -215,13 +213,15 @@ def test_removed_fields_are_gone_from_dataclass_and_json():
     import json
 
     t = parse_category_page(SAMPLE_PAGE, AgeCategory.JUNIORZY, "https://example/test")[0]
-    for removed in ("director", "entry_fee", "court_surface", "court_count"):
+    for removed in ("director", "entry_fee", "court_surface", "court_count", "organiser", "venue_address"):
         assert not hasattr(t, removed)
     payload = json.dumps(t.to_dict(), ensure_ascii=False)
     assert "director" not in payload
     assert "entry_fee" not in payload
     assert "court_surface" not in payload
     assert "court_count" not in payload
+    assert "organiser" not in payload
+    assert "venue_address" not in payload
 
 
 def test_to_dict_is_json_serializable():
@@ -245,8 +245,6 @@ def test_search_closes_at_summer_is_utc_plus_2():
         ranga=None,
         date_from=datetime(2026, 8, 7).date(),
         date_to=None,
-        organiser=None,
-        venue_address=None,
         wojewodztwo=None,
         entry_deadline=None,
         withdrawal_deadline=None,
@@ -267,8 +265,6 @@ def test_search_closes_at_winter_is_utc_plus_1():
         ranga=None,
         date_from=datetime(2026, 1, 10).date(),
         date_to=None,
-        organiser=None,
-        venue_address=None,
         wojewodztwo=None,
         entry_deadline=None,
         withdrawal_deadline=None,
@@ -287,10 +283,135 @@ def test_search_closes_at_none_without_date_from():
         ranga=None,
         date_from=None,
         date_to=None,
-        organiser=None,
-        venue_address=None,
         wojewodztwo=None,
         entry_deadline=None,
         withdrawal_deadline=None,
     )
     assert t.search_closes_at is None
+
+
+# Mirrors the four broken U18 blocks: tournAppTopCent_B renders with no
+# "Od:"/"Do:" text at all (e.g. emoji-laden names on some group-play
+# tournaments break PZT's normal date block), but tournAppTopRightConDate
+# still carries the ISO start date, so date_from should fall back to it.
+TOURNAMENT_MISSING_PRIMARY_DATE = """
+<div class="tournAppContainer_B">
+  <div class="tournAppTopMain1_B">
+    <div class="tournAppTopMain2_B">
+      <div class="tournAppTop_B" onclick="ToggleDisplay(5);">
+        <div class="tournAppTopLeft_B_1">
+          <div class="tournAppTopLeft_B">
+            <div class="tournAppStatus_B"><div class="tournAppStatusNo"></div></div>
+            <div class="tournAppName_B">WTK - \U0001F44BU18 chl\U0001F3BEdz\U0001F600Uniejow\U0001F600turniej grupowy\U0001F947\U0001F948\U0001F949</div>
+            <div class="tournAppRang_B_main">
+              <div class="tournAppRang_B"><div class="tournAppRangCount">4</div><div class="tournAppRangContent">Ranga</div></div>
+            </div>
+          </div>
+          <div class="tournAppTopCent_B"></div>
+          <div class="tournAppTopRightConDate">Turniej gł.: 2026-08-07</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tournAppContent_B" id="d5">
+    <div id="ctl00_dTournDetails5">
+      <div class="tournAppContentRow2_B">
+        <div class="tournAppContentColL_B">Termin zgłoszeń</div>
+        <div class="tournAppContentColR_B">2026-07-20 23:59</div>
+      </div>
+      <div class="tournAppContentRow2_B">
+        <div class="tournAppContentColLBn_B">Rozgrywki</div>
+        <div class="tournAppContentColR_B dtlEvent">
+          <table><tbody>
+            <tr><td><div class="dDtlEventsMainCont1"><span class="tournAppEventsDescLeft">Kategoria: </span>Juniorzy - do 18 lat<br><div class="tournAppEventsDescLeft">Typ: </div><div class="tournAppEventsDescRight">Gra podwójna; Chłopcy; Grupowo-pucharowy 16 Uwagi: Losowanie WKS-WZT Łódź, korty 1-4</div></div></td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <a href="/TournamentResults.aspx?TournamentID=aa11bb22-3344-5566-7788-99aabbccddee" target="_blank">Szczegóły turnieju</a>
+    </div>
+  </div>
+</div>
+"""
+
+# No usable date anywhere: neither tournAppTopCent_B nor
+# tournAppTopRightConDate parse. date_from must stay None and the parser
+# must warn instead of writing garbage.
+TOURNAMENT_NO_DATE_AT_ALL = """
+<div class="tournAppContainer_B">
+  <div class="tournAppTopMain1_B">
+    <div class="tournAppTopMain2_B">
+      <div class="tournAppTop_B" onclick="ToggleDisplay(6);">
+        <div class="tournAppTopLeft_B_1">
+          <div class="tournAppTopLeft_B">
+            <div class="tournAppStatus_B"><div class="tournAppStatusNo"></div></div>
+            <div class="tournAppName_B">MW Turniej bez daty</div>
+            <div class="tournAppRang_B_main">
+              <div class="tournAppRang_B"><div class="tournAppRangCount">7</div><div class="tournAppRangContent">Ranga</div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tournAppContent_B" id="d6">
+    <div id="ctl00_dTournDetails6">
+      <div class="tournAppContentRow2_B">
+        <div class="tournAppContentColLBn_B">Rozgrywki</div>
+        <div class="tournAppContentColR_B dtlEvent">
+          <table><tbody>
+            <tr><td><div class="dDtlEventsMainCont1"><span class="tournAppEventsDescLeft">Kategoria: </span>Juniorzy - do 18 lat<br><div class="tournAppEventsDescLeft">Typ: </div><div class="tournAppEventsDescRight">Gra pojedyncza; Chłopcy; do 2 przegranych setow</div></div></td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <a href="/TournamentResults.aspx?TournamentID=11223344-5566-7788-99aa-bbccddeeff00" target="_blank">Szczegóły turnieju</a>
+    </div>
+  </div>
+</div>
+"""
+
+
+def test_draw_format_truncated_at_uwagi_marker():
+    tournaments = parse_category_page(
+        TOURNAMENT_MISSING_PRIMARY_DATE, AgeCategory.JUNIORZY, "https://example/test"
+    )
+    t = tournaments[0]
+    doubles = t.doubles_events[0]
+    assert doubles.draw_format == "Grupowo-pucharowy 16"
+    assert "Uwagi:" in doubles.raw_text
+    assert "Losowanie" in doubles.raw_text
+
+
+def test_date_from_falls_back_to_top_right_con_date(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="scrapers.tournaments.parser"):
+        tournaments = parse_category_page(
+            TOURNAMENT_MISSING_PRIMARY_DATE, AgeCategory.JUNIORZY, "https://example/test"
+        )
+    t = tournaments[0]
+    assert t.date_from.isoformat() == "2026-08-07"
+    assert t.date_to is None
+    assert any("falling back to tournAppTopRightConDate" in message for message in caplog.messages)
+
+
+def test_missing_date_from_logs_warning_and_stays_none(caplog):
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="scrapers.tournaments.parser"):
+        tournaments = parse_category_page(TOURNAMENT_NO_DATE_AT_ALL, AgeCategory.JUNIORZY, "https://example/test")
+    t = tournaments[0]
+    assert t.date_from is None
+    assert any("parsed with no date_from" in message for message in caplog.messages)
+
+
+def test_find_tournament_html_at_returns_block_by_index():
+    page = "<html><body>" + TOURNAMENT_WITH_TABLE_ODWOLANIA + TOURNAMENT_PLAIN_ODWOLANIA_NO_WOJEWODZTWO + "</body></html>"
+    first = find_tournament_html_at(page, 0)
+    second = find_tournament_html_at(page, 1)
+    assert first is not None and "Puchar KT Testowy" in first
+    assert second is not None and "Juniorow bez debla" in second
+
+
+def test_find_tournament_html_at_out_of_range_returns_none():
+    page = "<html><body>" + TOURNAMENT_WITH_TABLE_ODWOLANIA + "</body></html>"
+    assert find_tournament_html_at(page, 5) is None

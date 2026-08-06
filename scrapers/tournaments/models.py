@@ -107,8 +107,6 @@ class Tournament:
     ranga: int | None
     date_from: date | None
     date_to: date | None
-    organiser: str | None
-    venue_address: str | None
     wojewodztwo: str | None
     entry_deadline: datetime | None
     withdrawal_deadline: datetime | None
@@ -150,8 +148,6 @@ class Tournament:
             "ranga": self.ranga,
             "date_from": self.date_from.isoformat() if self.date_from else None,
             "date_to": self.date_to.isoformat() if self.date_to else None,
-            "organiser": self.organiser,
-            "venue_address": self.venue_address,
             "wojewodztwo": self.wojewodztwo,
             "entry_deadline": self.entry_deadline.isoformat() if self.entry_deadline else None,
             "withdrawal_deadline": self.withdrawal_deadline.isoformat() if self.withdrawal_deadline else None,
