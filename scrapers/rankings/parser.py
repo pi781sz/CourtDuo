@@ -2,8 +2,10 @@
 
 Unlike scrapers.tournaments.parser, these selectors were NOT verified
 against a live fetch — this environment has no network path to
-portal.pzt.pl (outbound access is allowlisted and PZT isn't on it). The
-approach below is deliberately defensive as a result:
+portal.pzt.pl (outbound access is allowlisted and PZT isn't on it, and
+that has been re-confirmed: the agent egress proxy returns a policy
+403 for portal.pzt.pl). The approach below is deliberately defensive as
+a result:
 
 - The ranking table itself is found by matching its header row's TEXT
   against known Polish column labels ("Zawodnik", "Klub", "Pkt", ...),
@@ -14,6 +16,26 @@ approach below is deliberately defensive as a result:
   it, which is what --dump-html / --dump-index-html are for (see
   __main__.py): run them against the live page and adjust
   _HEADER_FIELD_SYNONYMS / _find_ranking_table accordingly.
+- `_find_ranking_table` no longer assumes the header row is exactly
+  `rows[0]` of the table — it scans the first few rows of each table for
+  one that maps known columns. This is the header-matching analogue of
+  the tournament parser's class-*prefix* matching for "_light" variants:
+  match leniently by pattern/position instead of a rigid exact index, so
+  a leading caption/title row PZT renders only on some views (this is
+  the working theory for why Sort=LP was reported as returning "No
+  ranking table found" while Sort=A on the same list works) doesn't
+  blank out detection. This still could not be verified against a live
+  Sort=LP fetch for the reason above — if it turns out to be wrong,
+  --dump-html against the real page is the way to correct it.
+- The player-name cell also gets the same treatment for a different
+  reason: PZT apparently renders an ITF ranking badge as a further
+  descendant of the same name link (e.g. "Błuś Aleksander" plus a nested
+  "Miejsce 77 na listach ITF 18" span). Node.text() defaults to
+  `deep=True` with an empty separator, so reading the whole cell/link
+  glues the two together with no boundary. `_extract_name_and_itf_note`
+  reads the name node's own text only (`deep=False`) to avoid pulling in
+  that descendant, with a "Miejsce" cut as a last-resort fallback for the
+  case where there's no enclosing element to exclude at all.
 - The PZT ID is read from the query string of the player's row link
   (e.g. an href containing "...ID=12345"), since CLAUDE.md notes the
   alphabetical roster is the player lookup table and there's no need to
@@ -46,6 +68,10 @@ _ID_PARAM_RE = re.compile(r"[?&][A-Za-z]*[Ii][Dd]=([^&#\"']+)")
 # whitespace normalization and stripping trailing "." / ":". Kept as sets
 # of known PZT synonyms rather than a single guessed label per field,
 # since Sort=LP and Sort=A pages are not assumed to use identical wording.
+# points/birth_year synonyms are widened defensively (could not be checked
+# against a live header row — see module docstring); if a real page uses
+# wording outside these sets the column is simply left unmapped rather than
+# silently mis-mapped, and the unmatched header text is logged at DEBUG.
 _HEADER_FIELD_SYNONYMS: dict[str, set[str]] = {
     "position": {"l.p.", "l.p", "lp", "poz", "poz.", "pozycja", "miejsce"},
     "pzt_id": {"id", "id zawodnika", "nr pzt", "numer pzt"},
@@ -59,9 +85,29 @@ _HEADER_FIELD_SYNONYMS: dict[str, set[str]] = {
         "gracz",
     },
     "club": {"klub"},
-    "points": {"pkt", "pkt.", "punkty", "suma pkt", "suma punktów"},
-    "birth_year": {"rok ur.", "rok ur", "rok urodzenia", "ur.", "rocznik"},
+    "points": {"pkt", "pkt.", "punkty", "suma pkt", "suma punktów", "punkty rankingowe", "suma punktów rankingowych"},
+    "birth_year": {
+        "rok ur.",
+        "rok ur",
+        "rok urodzenia",
+        "ur.",
+        "rocznik",
+        "r.ur.",
+        "r. ur.",
+        "rok",
+    },
 }
+
+# Sort-order indicator characters PZT (or a browser rendering it) may
+# append/prepend to the currently-sorted column's header text (e.g. "L.p. ▲").
+_SORT_INDICATOR_CHARS = "▲▼△▽↑↓"
+
+# How many leading rows of a table are checked for a header match before
+# giving up on that table. >1 so a leading caption/title row (present on
+# some views, absent on others) doesn't hide the real header from row 0.
+_MAX_HEADER_ROW_SCAN = 3
+
+_ITF_BADGE_MARKER = "Miejsce"
 
 
 def _normalize(text: str) -> str:
@@ -69,17 +115,22 @@ def _normalize(text: str) -> str:
 
 
 def _normalize_header(text: str) -> str:
-    return _normalize(text).lower().rstrip(".:")
+    stripped = text.strip(_SORT_INDICATOR_CHARS + " \t\n\r")
+    return _normalize(stripped).lower().rstrip(".:")
 
 
 def _map_headers(header_cells: list[Node]) -> dict[int, str]:
     mapping: dict[int, str] = {}
     for i, cell in enumerate(header_cells):
         norm = _normalize_header(cell.text(strip=True))
+        matched = False
         for field, synonyms in _HEADER_FIELD_SYNONYMS.items():
             if norm in synonyms:
                 mapping[i] = field
+                matched = True
                 break
+        if not matched and norm:
+            logger.debug("Ranking table header cell did not match any known field: %r", norm)
     return mapping
 
 
@@ -91,23 +142,64 @@ def _find_ranking_table(root: Node) -> tuple[Node, dict[int, str], list[Node]] |
     the highest-scoring table along with its header mapping and data rows
     (header row excluded). Returns None if nothing on the page looks like
     a ranking table.
+
+    The header row is not assumed to be `rows[0]`: the first
+    `_MAX_HEADER_ROW_SCAN` rows of each table are checked in order and the
+    first one that maps a `full_name` column wins, so a leading
+    caption/title row present on only some views doesn't blank out
+    detection (see module docstring).
     """
     best: tuple[int, Node, dict[int, str], list[Node]] | None = None
     for table in root.css("table"):
         rows = table.css("tr")
         if len(rows) < 2:
             continue
-        header_cells = rows[0].css("th") or rows[0].css("td")
-        mapping = _map_headers(header_cells)
-        if "full_name" not in mapping.values():
-            continue
-        score = len(mapping)
-        if best is None or score > best[0]:
-            best = (score, table, mapping, rows[1:])
+        for header_idx in range(min(_MAX_HEADER_ROW_SCAN, len(rows) - 1)):
+            header_row = rows[header_idx]
+            header_cells = header_row.css("th") or header_row.css("td")
+            if not header_cells:
+                continue
+            mapping = _map_headers(header_cells)
+            if "full_name" not in mapping.values():
+                continue
+            score = len(mapping)
+            if best is None or score > best[0]:
+                best = (score, table, mapping, rows[header_idx + 1 :])
+            break
     if best is None:
         return None
     _, table, mapping, data_rows = best
     return table, mapping, data_rows
+
+
+def _extract_name_and_itf_note(cell: Node) -> tuple[str, str | None]:
+    """Splits a ranking name cell into the player's name and an optional ITF note.
+
+    Reads the name node's own text (`deep=False`) rather than the full
+    cell/link text, so a badge PZT renders as a descendant of the same
+    node (e.g. an ITF ranking note nested inside the name link) isn't
+    concatenated onto the name with no separator — see module docstring.
+    Falls back to cutting at the literal "Miejsce" marker for the rare
+    case where the name and badge are plain sibling text nodes with no
+    enclosing element to exclude at all.
+    """
+    name_node = cell.css_first("a") or cell
+    own_text = _normalize(name_node.text(deep=False, strip=True))
+    full_text = _normalize(name_node.text(deep=True, separator=" ", strip=True))
+
+    name = own_text or full_text
+    itf_note: str | None = None
+
+    marker_idx = name.find(_ITF_BADGE_MARKER)
+    if marker_idx != -1:
+        itf_note = name[marker_idx:].strip()
+        name = name[:marker_idx].strip()
+    elif own_text and full_text != own_text and full_text.startswith(own_text):
+        remainder = full_text[len(own_text) :].strip()
+        if remainder:
+            itf_note = remainder
+
+    return name, (itf_note or None)
 
 
 def _extract_pzt_id_from_row(row: Node) -> str | None:
@@ -152,8 +244,14 @@ def _parse_row(
         return None
 
     values: dict[str, str] = {}
+    itf_note: str | None = None
     for idx, field in mapping.items():
-        if idx < len(cells):
+        if idx >= len(cells):
+            continue
+        if field == "full_name":
+            name, itf_note = _extract_name_and_itf_note(cells[idx])
+            values[field] = name
+        else:
             values[field] = cells[idx].text(strip=True)
 
     full_name = _normalize(values.get("full_name", ""))
@@ -177,6 +275,7 @@ def _parse_row(
         position=position,
         points=points,
         birth_year=birth_year,
+        itf_note=itf_note,
         source_url=source_url,
     )
 

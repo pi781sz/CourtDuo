@@ -63,6 +63,56 @@ RANKING_A_PAGE = """
 </body></html>
 """
 
+# Models a leading caption row before the real header row, plus a sort
+# indicator glyph on the actively-sorted column's header ("L.p. ▲") -- the
+# working theory for why a live Sort=LP fetch was reported as returning "No
+# ranking table found" while Sort=A on the same list worked (see the
+# _find_ranking_table docstring in scrapers/rankings/parser.py). Names are
+# invented, none are real players.
+RANKING_LP_PAGE_WITH_CAPTION_ROW = """
+<html><body>
+<table id="ctl00_gvRanking">
+  <tr><th colspan="5">Ranking Juniorzy Chłopcy - Sierpień 2026</th></tr>
+  <tr><th>L.p. ▲</th><th>Zawodnik</th><th>Rok ur.</th><th>Klub</th><th>Pkt</th></tr>
+  <tr>
+    <td>1</td>
+    <td><a href="/Player.aspx?ZawodnikID=100234">Testowski Jan</a></td>
+    <td>2012</td>
+    <td>KT Przykładowo</td>
+    <td>340,50</td>
+  </tr>
+  <tr>
+    <td>2</td>
+    <td><a href="/Player.aspx?ZawodnikID=100777">Wzorcowy Adam</a></td>
+    <td>2013</td>
+    <td>UKS Demo Warszawa</td>
+    <td>310</td>
+  </tr>
+</table>
+</body></html>
+"""
+
+# Models PZT nesting an ITF ranking badge as a further descendant of the
+# same name link -- Node.text() defaults to deep=True with no separator,
+# so reading the whole cell/link concatenates the two with no boundary
+# ("Błuś AleksanderMiejsce 77 na listach ITF 18"). Invented name.
+RANKING_LP_PAGE_WITH_ITF_BADGE = """
+<html><body>
+<table id="ctl00_gvRanking">
+  <tr><th>L.p.</th><th>Zawodnik</th><th>Rok ur.</th><th>Klub</th><th>Pkt</th></tr>
+  <tr>
+    <td>1</td>
+    <td>
+      <a href="/Player.aspx?ZawodnikID=100999">Błuś Aleksander<span class="itfBadge">Miejsce 77 na listach ITF 18</span></a>
+    </td>
+    <td>2011</td>
+    <td>TKS Przykładowo</td>
+    <td>420</td>
+  </tr>
+</table>
+</body></html>
+"""
+
 
 def test_parse_ranking_index_returns_most_recent_period():
     assert parse_ranking_index(RANKING_INDEX_PAGE) == (2026, 8)
@@ -136,3 +186,60 @@ def test_ranking_list_url_uses_code_sort_year_month():
 def test_ranking_list_metadata():
     assert RankingList.W16.age_category_label == "Kadeci"
     assert RankingList.W16.gender_label == "Dziewczęta"
+
+
+def test_lp_page_with_leading_caption_row_still_finds_table():
+    entries = parse_ranking_page(
+        RANKING_LP_PAGE_WITH_CAPTION_ROW, RankingList.M18, Sort.RANKED, 2026, 8, "https://example/test"
+    )
+    assert len(entries) == 2
+    assert entries[0].full_name == "Testowski Jan"
+    assert entries[0].position == 1
+    assert entries[0].points == 340.5
+    assert entries[0].birth_year == 2012
+
+
+def test_sort_indicator_glyph_on_header_does_not_break_matching():
+    entries = parse_ranking_page(
+        RANKING_LP_PAGE_WITH_CAPTION_ROW, RankingList.M18, Sort.RANKED, 2026, 8, "https://example/test"
+    )
+    assert all(e.position is not None for e in entries)
+
+
+def test_itf_badge_is_stripped_from_full_name():
+    entries = parse_ranking_page(
+        RANKING_LP_PAGE_WITH_ITF_BADGE, RankingList.M18, Sort.RANKED, 2026, 8, "https://example/test"
+    )
+    assert len(entries) == 1
+    assert entries[0].full_name == "Błuś Aleksander"
+
+
+def test_itf_badge_is_captured_as_itf_note():
+    entries = parse_ranking_page(
+        RANKING_LP_PAGE_WITH_ITF_BADGE, RankingList.M18, Sort.RANKED, 2026, 8, "https://example/test"
+    )
+    assert entries[0].itf_note == "Miejsce 77 na listach ITF 18"
+
+
+def test_name_without_itf_badge_has_no_itf_note():
+    entries = parse_ranking_page(RANKING_LP_PAGE, RankingList.M18, Sort.RANKED, 2026, 8, "https://example/test")
+    assert entries[0].itf_note is None
+
+
+def test_itf_badge_flat_text_falls_back_to_miejsce_cut():
+    flat_page = """
+    <html><body>
+    <table id="ctl00_gvRanking">
+      <tr><th>L.p.</th><th>Zawodnik</th><th>Klub</th></tr>
+      <tr>
+        <td>1</td>
+        <td>Kowalski AntoniMiejsce 12 na listach ITF 16</td>
+        <td>MKT Przykładowo</td>
+      </tr>
+    </table>
+    </body></html>
+    """
+    entries = parse_ranking_page(flat_page, RankingList.M16, Sort.RANKED, 2026, 8, "https://example/test")
+    assert len(entries) == 1
+    assert entries[0].full_name == "Kowalski Antoni"
+    assert entries[0].itf_note == "Miejsce 12 na listach ITF 16"
