@@ -66,6 +66,8 @@ async def upsert_tournament(session: AsyncSession, tournament: ScrapedTournament
         "date_from": tournament.date_from,
         "date_to": tournament.date_to,
         "wojewodztwo": tournament.wojewodztwo,
+        "venue_address": tournament.venue_address,
+        "venue_city": tournament.venue_city,
         "entry_deadline": tournament.entry_deadline,
         "withdrawal_deadline": tournament.withdrawal_deadline,
         "search_closes_at": tournament.search_closes_at,
