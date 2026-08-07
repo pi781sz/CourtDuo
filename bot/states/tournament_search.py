@@ -1,11 +1,11 @@
-"""FSM state for tournament search by place (CLAUDE.md build order step
-5 — not built yet).
+"""FSM state for tournament search by place (CLAUDE.md, "Tournament
+selection"; build order step 5).
 
-Only the entry state exists so far: bot/tournament_search.py sets it
-after a successful registration and on /start for a returning player;
-bot/handlers/tournament_search.py has a temporary stub handler for it.
-TODO(step 5): the real place-search handler replaces the stub; this
-state itself stays.
+bot/tournament_search.py sets it after a successful registration and on
+/start for a returning player; bot/handlers/tournament_search.py handles
+both the typed place and the result buttons (pagination, "show all",
+"change place") while staying in this one state, since tapping a
+tournament hands off to step 6 rather than moving the FSM forward itself.
 """
 
 from __future__ import annotations
