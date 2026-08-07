@@ -1,7 +1,7 @@
-"""Forgiving player-name search for registration (see CLAUDE.md,
-"Registration flow" step 3): case-insensitive, ignores Polish diacritics,
-and doesn't care which word comes first ("Kowalski Jan" finds "Jan
-Kowalski").
+"""Forgiving player-name search for finding an invitation target (see
+CLAUDE.md's user journeys — the player types the name of who they want to
+invite, not their own): case-insensitive, ignores Polish diacritics, and
+doesn't care which word comes first ("Kowalski Jan" finds "Jan Kowalski").
 """
 
 from __future__ import annotations

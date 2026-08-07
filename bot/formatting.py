@@ -10,5 +10,5 @@ from bot.i18n import t
 
 def format_position(position: int | None, lang: str) -> str:
     if position is None:
-        return t("registration.position_unknown", lang)
-    return t("registration.position_known", lang, position=position)
+        return t("player.position_unknown", lang)
+    return t("player.position_known", lang, position=position)

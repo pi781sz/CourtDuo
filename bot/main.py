@@ -1,5 +1,8 @@
 """Bot entrypoint. Reads BOT_TOKEN/DATABASE_URL from the environment
 (CLAUDE.md, "Never commit secrets") and starts long polling.
+
+No routers are registered yet — the invitation-flow handlers are future
+work (CLAUDE.md, "Build order" items 4+), not part of this schema change.
 """
 
 from __future__ import annotations
@@ -12,27 +15,14 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import BotCommand
 from dotenv import load_dotenv
 
-from bot.handlers import my_players, start
-from bot.i18n import t
-from bot.lang import DEFAULT_LANG
 from bot.middlewares.db import DbSessionMiddleware
 
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-async def _set_commands(bot: Bot) -> None:
-    await bot.set_my_commands(
-        [
-            BotCommand(command="start", description=t("commands.start", DEFAULT_LANG)),
-            BotCommand(command="moi_zawodnicy", description=t("commands.moi_zawodnicy", DEFAULT_LANG)),
-        ]
-    )
 
 
 async def main() -> None:
@@ -47,10 +37,6 @@ async def main() -> None:
     dispatcher.message.middleware(db_middleware)
     dispatcher.callback_query.middleware(db_middleware)
 
-    dispatcher.include_router(start.router)
-    dispatcher.include_router(my_players.router)
-
-    await _set_commands(bot)
     await bot.delete_webhook(drop_pending_updates=True)
     await dispatcher.start_polling(bot)
 

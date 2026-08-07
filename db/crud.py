@@ -10,18 +10,18 @@ Because db.models.enums re-exports the scrapers' own AgeCategory/Gender/
 PlayType/RankingList enums, a scraped dataclass's enum fields pass
 straight into a mapped column with no translation step.
 
-No bot logic lives here beyond straightforward persistence: can_start_search
-(the entitlement check CLAUDE.md's "Monetisation" section asks to be
-routed through from day one) and the account/player-link CRUD that
-registration needs. The matching engine itself (search/request/match
-transactions) is bot code, out of scope for this task.
+No bot logic lives here beyond straightforward persistence:
+can_send_invitation (the entitlement check CLAUDE.md's "Monetisation"
+section asks to be routed through from day one) and the account CRUD that
+registration needs. The invitation engine itself (invitation send/accept/
+reject transactions) is bot code, out of scope for this task.
 """
 
 from __future__ import annotations
 
 import logging
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,8 +31,6 @@ from scrapers.tournaments.models import Tournament as ScrapedTournament
 
 from .models import (
     Account,
-    AccountPlayer,
-    AccountRole,
     AgeCategory,
     Event,
     Gender,
@@ -137,9 +135,9 @@ async def upsert_ranking_entry(session: AsyncSession, entry: ScrapedRankingEntry
     a ranking row, then the ranking row itself for entry.year/entry.month.
 
     Returns None (and writes nothing) if PZT rendered the row with no
-    pzt_id — CLAUDE.md's "Registration flow" makes the alphabetical
-    roster the player lookup table, and a row with no id can't be linked
-    to an account later. scrapers.rankings.parser already logs this case.
+    pzt_id — CLAUDE.md's "Identity" makes the alphabetical roster the
+    registration lookup table, and a row with no id can't be linked to an
+    account later. scrapers.rankings.parser already logs this case.
     """
     if entry.pzt_id is None:
         logger.warning(
@@ -216,42 +214,19 @@ async def get_account_by_telegram_id(session: AsyncSession, telegram_id: int) ->
     return result.scalar_one_or_none()
 
 
-async def get_or_create_account(session: AsyncSession, telegram_id: int, role: AccountRole) -> Account:
-    """Creates the account row on first /start (CLAUDE.md, "Accounts
-    belong to adults"). Returns the existing account unchanged if the
-    adult has already registered — /start never overwrites a previously
-    chosen role.
+async def get_or_create_account(session: AsyncSession, telegram_id: int, pzt_id: str) -> Account:
+    """Creates the account row on first /start (CLAUDE.md, "Identity": one
+    Telegram account is one PZT player). Returns the existing account
+    unchanged if this Telegram id has already registered — /start never
+    overwrites a previously linked player.
     """
     account = await get_account_by_telegram_id(session, telegram_id)
     if account is not None:
         return account
-    account = Account(telegram_id=telegram_id, role=role)
+    account = Account(telegram_id=telegram_id, pzt_id=pzt_id)
     session.add(account)
     await session.flush()
     return account
-
-
-async def link_player_to_account(session: AsyncSession, account_id: int, player_pzt_id: str) -> None:
-    stmt = insert(AccountPlayer).values(account_id=account_id, player_pzt_id=player_pzt_id)
-    stmt = stmt.on_conflict_do_nothing(index_elements=[AccountPlayer.account_id, AccountPlayer.player_pzt_id])
-    await session.execute(stmt)
-
-
-async def unlink_player_from_account(session: AsyncSession, account_id: int, player_pzt_id: str) -> None:
-    stmt = delete(AccountPlayer).where(
-        AccountPlayer.account_id == account_id, AccountPlayer.player_pzt_id == player_pzt_id
-    )
-    await session.execute(stmt)
-
-
-async def list_account_players(session: AsyncSession, account_id: int) -> list[Player]:
-    result = await session.execute(
-        select(Player)
-        .join(AccountPlayer, AccountPlayer.player_pzt_id == Player.pzt_id)
-        .where(AccountPlayer.account_id == account_id)
-        .order_by(Player.full_name)
-    )
-    return list(result.scalars().all())
 
 
 async def get_player_by_pzt_id(session: AsyncSession, pzt_id: str) -> Player | None:
@@ -269,13 +244,13 @@ async def get_latest_ranking_for_player(session: AsyncSession, pzt_id: str) -> R
     return result.scalar_one_or_none()
 
 
-async def can_start_search(account: Account, tournament: Tournament) -> bool:
-    """Entitlement gate for starting a new search (CLAUDE.md, "Monetisation
-    — build now, enable later").
+async def can_send_invitation(account: Account, tournament: Tournament) -> bool:
+    """Entitlement gate for sending a new invitation (CLAUDE.md,
+    "Monetisation — build now, enable later").
 
-    Always True today — everything is free at launch. Search creation
+    Always True today — everything is free at launch. Invitation creation
     must always route through this function rather than checking
-    account.plan/searches_used directly, so that when paid tiers launch
+    account.plan/invitations_used directly, so that when paid tiers launch
     exactly one function changes.
     """
     return True

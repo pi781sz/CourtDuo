@@ -2,7 +2,7 @@
 sources"): a tournament is the overall competition; an event is one
 `Kategoria: ... Typ: ...` line inside its `Rozgrywki` block. Most
 tournaments have no `Gra podwójna` event at all — `Event.is_doubles` is
-the flag everything downstream (search creation) filters on.
+the flag everything downstream (invitation creation) filters on.
 
 `guid` is PZT's own tournament identifier (extracted from the results
 link, see scrapers.tournaments.parser) and is used as the natural primary
@@ -12,7 +12,6 @@ key, since it's what re-running the scraper upserts against.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
@@ -20,9 +19,6 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
 from .enums import AgeCategory, Gender, PlayType
-
-if TYPE_CHECKING:
-    from .matching import Search
 
 
 class Tournament(TimestampMixin, Base):
@@ -44,8 +40,8 @@ class Tournament(TimestampMixin, Base):
 
     # UTC instant. See Tournament.search_closes_at in
     # scrapers/tournaments/models.py for the 10:00 Europe/Warsaw ->  UTC
-    # conversion — searches stay open until this instant regardless of
-    # entry_deadline (CLAUDE.md, "Matching engine").
+    # conversion — invitations expire at this instant regardless of
+    # entry_deadline (CLAUDE.md, "Invitation engine").
     search_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     events: Mapped[list["Event"]] = relationship(back_populates="tournament", cascade="all, delete-orphan")
@@ -68,4 +64,3 @@ class Event(TimestampMixin, Base):
     is_doubles: Mapped[bool] = mapped_column(Boolean, nullable=False)
 
     tournament: Mapped["Tournament"] = relationship(back_populates="events")
-    searches: Mapped[list["Search"]] = relationship(back_populates="event", cascade="all, delete-orphan")
