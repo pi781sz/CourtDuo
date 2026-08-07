@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -214,16 +214,23 @@ async def get_account_by_telegram_id(session: AsyncSession, telegram_id: int) ->
     return result.scalar_one_or_none()
 
 
-async def get_or_create_account(session: AsyncSession, telegram_id: int, pzt_id: str) -> Account:
-    """Creates the account row on first /start (CLAUDE.md, "Identity": one
-    Telegram account is one PZT player). Returns the existing account
-    unchanged if this Telegram id has already registered — /start never
-    overwrites a previously linked player.
+async def get_account_by_pzt_id(session: AsyncSession, pzt_id: str) -> Account | None:
+    """Used by registration to refuse a pzt_id that's already bound to a
+    different Telegram account (CLAUDE.md, "one PZT player = one Telegram
+    account"). `pzt_id` must already be normalized — see
+    bot.registration.normalize_pzt_id.
     """
-    account = await get_account_by_telegram_id(session, telegram_id)
-    if account is not None:
-        return account
-    account = Account(telegram_id=telegram_id, pzt_id=pzt_id)
+    result = await session.execute(select(Account).where(Account.pzt_id == pzt_id))
+    return result.scalar_one_or_none()
+
+
+async def create_account(session: AsyncSession, telegram_id: int, pzt_id: str, full_name: str, gender: str) -> Account:
+    """Creates the account row on first successful registration
+    (CLAUDE.md, "Identity": one Telegram account is one PZT player).
+    Callers must already have verified this telegram_id has no account
+    and this pzt_id isn't bound elsewhere — see bot.registration.
+    """
+    account = Account(telegram_id=telegram_id, pzt_id=pzt_id, full_name=full_name, gender=gender)
     session.add(account)
     await session.flush()
     return account
@@ -242,6 +249,42 @@ async def get_latest_ranking_for_player(session: AsyncSession, pzt_id: str) -> R
         .limit(1)
     )
     return result.scalar_one_or_none()
+
+
+async def get_latest_ranking_period_overall(session: AsyncSession) -> tuple[int, int] | None:
+    """The newest (year, month) present anywhere in the rankings table.
+
+    Registration (CLAUDE.md's LOOKUP RULES) looks a typed PZT id up in
+    this single newest period rather than per-list, since PZT publishes
+    all eight lists together each month (see scrapers.rankings.models,
+    RANKING_INDEX_URL) — there is one canonical "current" period, and
+    using it lets a stale/missing single list surface as a gender
+    conflict or a not-found instead of silently matching an older month.
+    """
+    result = await session.execute(
+        select(Ranking.year, Ranking.month).order_by(Ranking.year.desc(), Ranking.month.desc()).limit(1)
+    )
+    row = result.first()
+    return (row.year, row.month) if row else None
+
+
+async def get_rankings_for_player_in_period(
+    session: AsyncSession, pzt_id: str, year: int, month: int
+) -> list[Ranking]:
+    """Every ranking-list row a normalized pzt_id appears under in one
+    period — usually one, but a player who plays up appears in more than
+    one age category (CLAUDE.md, LOOKUP RULES). Matched case-insensitively
+    since `pzt_id` is normalized (bot.registration.normalize_pzt_id) but
+    the scraped column isn't guaranteed to be uppercase.
+    """
+    result = await session.execute(
+        select(Ranking).where(
+            func.upper(Ranking.player_pzt_id) == pzt_id,
+            Ranking.year == year,
+            Ranking.month == month,
+        )
+    )
+    return list(result.scalars().all())
 
 
 async def can_send_invitation(account: Account, tournament: Tournament) -> bool:

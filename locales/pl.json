@@ -6,6 +6,20 @@
     "greeting": "Cześć! 👋 CourtDuo pomaga młodym zawodnikom PZT zaprosić konkretnego partnera do gry podwójnej na turnieje.",
     "greeting_returning": "Cześć ponownie!"
   },
+  "registration": {
+    "ask_pzt_id": "Aby zacząć, podaj swój login PZT.",
+    "welcome": "Witaj {full_name}.",
+    "not_found": "Nie znaleziono zawodnika o takim loginie PZT. Sprawdź login i spróbuj ponownie.",
+    "already_bound": "Ten login PZT jest już powiązany z innym kontem Telegram.",
+    "too_many_attempts": "Zbyt wiele prób. Spróbuj ponownie za godzinę.",
+    "error_try_later": "Wystąpił błąd. Spróbuj ponownie później."
+  },
+  "tournament_search": {
+    "ask_place": "Podaj miejscowość turnieju."
+  },
+  "_temp_": {
+    "tournament_search_stub": "Wyszukiwanie turniejów jest w budowie. Wróć tu wkrótce!"
+  },
   "player": {
     "position_known": "{position}. w rankingu",
     "position_unknown": "brak rankingu w bazie"
