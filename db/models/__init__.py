@@ -8,19 +8,17 @@ autogenerate needs the full set of mapped classes registered on
 
 from __future__ import annotations
 
-from .accounts import Account, AccountPlayer
+from .accounts import Account
 from .base import Base
 from .enums import (
-    AccountRole,
     AgeCategory,
     Gender,
+    InvitationState,
     Plan,
     PlayType,
     RankingList,
-    RequestState,
-    SearchState,
 )
-from .matching import Match, Request, Search
+from .invitations import Invitation, PendingExternalInvite
 from .players import Player
 from .rankings import Ranking
 from .tournaments import Event, Tournament
@@ -28,20 +26,16 @@ from .tournaments import Event, Tournament
 __all__ = [
     "Base",
     "Account",
-    "AccountPlayer",
     "Player",
     "Ranking",
     "Tournament",
     "Event",
-    "Search",
-    "Request",
-    "Match",
-    "AccountRole",
+    "Invitation",
+    "PendingExternalInvite",
     "AgeCategory",
     "Gender",
+    "InvitationState",
     "Plan",
     "PlayType",
     "RankingList",
-    "RequestState",
-    "SearchState",
 ]

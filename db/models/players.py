@@ -1,7 +1,7 @@
 """A player is a junior registered with PZT. `pzt_id` is PZT's own id for
 them (read off the alphabetical ranking roster, see scrapers.rankings) and
 is used as the natural primary key rather than a surrogate id, since it's
-exactly what registration search and ranking upserts key off.
+exactly what invitation-target search and ranking upserts key off.
 
 full_name/club/age_category/gender are a snapshot of the player's latest
 scraped ranking row (see db.crud.upsert_ranking_entry) — CourtDuo doesn't
@@ -20,8 +20,8 @@ from .base import Base, TimestampMixin
 from .enums import AgeCategory, Gender
 
 if TYPE_CHECKING:
-    from .accounts import AccountPlayer
-    from .matching import Search
+    from .accounts import Account
+    from .invitations import Invitation, PendingExternalInvite
     from .rankings import Ranking
 
 
@@ -35,5 +35,13 @@ class Player(TimestampMixin, Base):
     gender: Mapped[Gender | None] = mapped_column(SAEnum(Gender, name="gender"), nullable=True)
 
     rankings: Mapped[list["Ranking"]] = relationship(back_populates="player", cascade="all, delete-orphan")
-    account_links: Mapped[list["AccountPlayer"]] = relationship(back_populates="player", cascade="all, delete-orphan")
-    searches: Mapped[list["Search"]] = relationship(back_populates="player", cascade="all, delete-orphan")
+    account: Mapped["Account | None"] = relationship(back_populates="player", uselist=False, cascade="all, delete-orphan")
+    sent_invitations: Mapped[list["Invitation"]] = relationship(
+        foreign_keys="Invitation.inviter_pzt_id", back_populates="inviter", cascade="all, delete-orphan"
+    )
+    received_invitations: Mapped[list["Invitation"]] = relationship(
+        foreign_keys="Invitation.invitee_pzt_id", back_populates="invitee", cascade="all, delete-orphan"
+    )
+    pending_external_invites: Mapped[list["PendingExternalInvite"]] = relationship(
+        back_populates="inviter", cascade="all, delete-orphan"
+    )

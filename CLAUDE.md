@@ -1,30 +1,30 @@
 # CourtDuo
 
-Telegram bot that helps Polish junior tennis players find doubles partners for PZT tournaments.
+Telegram bot that lets Polish junior tennis players invite a specific partner to play doubles at a PZT tournament.
 
 ---
 
-## Context
+## What this is — and what it is not
 
-**Who uses this:** Parents, guardians and coaches of junior players registered with Polski Związek Tenisowy (PZT). Every *player* in this system is a child aged roughly 10–18. The adult holds the Telegram account; the child does not.
+**It is:** a way for a player to send a structured invitation to another named player for a specific tournament, and get a yes or no.
 
-**The problem:** Junior tournaments have doubles draws, but players arrive without partners. Today this is solved through WhatsApp groups and Facebook posts. There is no central way to see who else needs a partner for a specific event.
+**It is not:** a directory, a browsable pool, or a matchmaking service. There is no "show me who is looking". A player can only reach someone whose name they already know. Do not build discovery features.
+
+Every user is a junior player aged roughly 10–18.
 
 ---
 
 ## Non-negotiable rules
 
-These are not preferences. Do not implement anything that violates them. If a requested feature would break one, say so instead of building it.
+Do not implement anything that violates these. If a request would break one, say so instead of building it.
 
-1. **No free-text messaging between users. Ever.** All interaction is inline keyboard buttons and pre-defined messages. No chat feature, no message relay, no "add a note for your partner" field.
+1. **No free-text messaging between users. Ever.** Every interaction is inline keyboard buttons and pre-defined messages. No chat, no message relay, no "add a note" field. An invitation carries only: inviter name, tournament, date, and two buttons.
 
-2. **Accounts belong to adults.** Registration asks the account holder to identify as *rodzic / opiekun / trener*. One account may manage several players (siblings, or a coach's squad).
+2. **The bot never looks up, stores, or displays a phone number.** In the "invite a non-user" flow the bot generates share text; the phone's own contact picker chooses the recipient. The bot never sees who it went to.
 
-3. **No automatic contact sharing.** On a confirmed match both sides see: player name, club, województwo, ranking position. Phone numbers and Telegram handles are shared **only** when both adults explicitly tap to share.
+3. **Never commit secrets.** Bot token, database URL, any credential → environment variables and GitHub Secrets. This repo is public.
 
-4. **Never commit secrets.** Bot token, database URL, any credential → environment variables and GitHub Secrets only. This repo is public.
-
-5. **Never commit scraped player data.** No CSV, JSON, SQLite or fixture file containing player names may enter git. These are children's names in a public repository. Data lives in the database only. Enforce with `.gitignore`.
+4. **Never commit scraped player data.** No CSV, JSON, SQLite or fixture containing real player names may enter git. These are children's names in a public repository. Test fixtures use invented names. Enforce with `.gitignore`.
 
 ---
 
@@ -32,18 +32,155 @@ These are not preferences. Do not implement anything that violates them. If a re
 
 Interface is Polish. **Never hardcode user-facing strings.**
 
-- All strings live in `locales/pl.json`
-- Accessed through a `t(key, lang)` helper
-- `locales/en.json` will be added later; the structure must support it from day one
-- Data stays Polish permanently — tournament names, clubs and cities come from PZT and are not translated
+- All strings in `locales/pl.json`, accessed via `t(key, lang)`
+- `locales/en.json` added later; structure supports it from day one
+- Data stays Polish permanently — tournament names, clubs and cities come from PZT untranslated
+
+---
+
+## Identity
+
+**One Telegram account = one PZT player.** Registration is by PZT ID, which the player already knows. No name search, no disambiguation, no role selection.
+
+Gender is derived from which ranking list the player appears in:
+- `M12` / `M14` / `M16` / `M18` → Chłopcy
+- `W12` / `W14` / `W16` / `W18` → Dziewczęta
+
+*(Multi-player accounts — a parent with two children — are not in scope now. Do not design them away, but do not build them.)*
+
+---
+
+## User journeys
+
+### Scenario 1 — invite a player who already uses CourtDuo
+
+```
+Bot:   Aby zacząć, podaj swój login PZT.
+Adam:  SWD12345
+Bot:   Witaj Adam Smith. Podaj miejscowość turnieju.
+Adam:  Uniejów
+Bot:   [buttons: matching tournaments with dates]
+Adam:  [taps one]
+Bot:   Turniej zaczyna się 2026.08.29.
+       Wpisz imię i nazwisko osoby, którą chcesz zaprosić.
+Adam:  Peter Lorenz
+Bot:   [confirmation screen, warns the match cannot be cancelled]
+Adam:  [confirms]
+Bot:   Zaproszenie zostało wysłane. Czekaj na odpowiedź.
+       🟠 Peter Lorenz — <tournament> — zaproszenie oczekujące
+```
+
+Peter simultaneously receives:
+
+```
+Adam Smith zaprasza Cię do gry podwójnej.
+<tournament name>
+<date>
+Uwaga: po akceptacji nie można zmienić partnera.
+[Zatwierdź]  [Odrzuć]
+```
+
+**On Zatwierdź** — both see 🟢 with tournament, date and partner name. Adam gets an alert: *"Peter Lorenz przyjął zaproszenie."*
+
+**On Odrzuć** — Peter sees 🔴 *"Odrzuciłeś zaproszenie od Adam Smith — <tournament>"*. Adam's status flips to 🔴 *odmowa* with the name and tournament.
+
+### Scenario 2 — the invited player is not on CourtDuo
+
+Identical until the name is entered. Then:
+
+```
+Bot:   Peter Lorenz nie używa CourtDuo. Wyślij mu zaproszenie:
+       [SMS]  [WhatsApp]  [Telegram]
+```
+
+Each button opens a share sheet with pre-written Polish invitation text and a link to the bot. **The recipient is chosen from the player's own phone contacts.** The bot never handles a number.
+
+Store a pending invite keyed on the typed name. When someone registers whose name matches, notify Adam: *"Peter Lorenz dołączył do CourtDuo"*, and offer to send the real invitation.
+
+### Scenario 3 — returning player
+
+Skips registration entirely. `/start` goes straight to *"Podaj miejscowość turnieju."*
+
+---
+
+## Tournament selection
+
+**Never ask the player to type a tournament name.** Real names are unusable — one live U18 tournament is literally `WTK - 👋U18 chł🎾dz😀Uniejów😀turniej grupowy🥇🥈🥉`.
+
+The player types a **place** (city or województwo). The bot matches against `venue_address` and `wojewodztwo`, diacritic-insensitively, and shows matching tournaments as buttons labelled *place — date*.
+
+Only show tournaments that:
+- start within the next 14 days
+- have at least one event with `Gra podwójna`
+- match the player's gender (`Chłopcy` / `Dziewczęta`)
+
+If nothing matches the typed place, offer a button to show all eligible tournaments in the next 14 days. Never dead-end.
+
+---
+
+## Pre-invitation checks
+
+Run these **at name-entry time, before the confirmation screen**, so a player never confirms an invitation that cannot succeed.
+
+**If the inviter is already matched at this tournament** — do not ask for a name at all:
+
+> *Masz już partnera na ten turniej: Peter Lorenz.*
+
+**If the named player is already matched at this tournament:**
+
+> *Peter Lorenz ma już partnera na ten turniej.*
+> *Wpisz imię i nazwisko innej osoby.*
+
+Never reveal **who** that partner is — it is not the inviter's business.
+
+**If a pending invitation to that same person for that tournament already exists:**
+
+> *Zaproszenie do Peter Lorenz zostało już wysłane. Czekaj na odpowiedź.*
+
+**If the named player's gender does not match the event:** refuse and explain.
+
+These checks are a courtesy, not a guarantee — the named player may accept someone else a second later. The atomic lock at accept time is what protects the data. Both are required.
+
+---
+
+## Invitation engine
+
+The part most likely to break. Be careful.
+
+**States:** `PENDING` → `ACCEPTED` | `REJECTED` | `CANCELLED` | `EXPIRED`
+
+**Rules:**
+
+- A player may have up to **3 pending outgoing invitations** per tournament.
+- **First accept wins.** On acceptance, all other pending invitations for **both** players at that tournament are cancelled. Each cancelled recipient is told: *"Ten zawodnik znalazł już partnera."*
+- **Atomic locking is mandatory.** The accept transaction must `SELECT … FOR UPDATE` the relevant invitation rows, re-verify neither player is already matched at that tournament, then commit. Without this you will eventually double-book someone.
+- **A confirmed match is locked.** Neither side can cancel or change partner. Both are warned of this *before* confirming — the inviter on the confirmation screen, the invitee in the invitation itself. *(Cancellation may be added later; do not build it now.)*
+- Invitations expire at **10:00 Europe/Warsaw on the tournament start date**, computed via `zoneinfo` and stored as UTC. Poland is UTC+2 in summer, UTC+1 in winter — never hardcode an offset.
+- Rejection is instant and free. The inviter may immediately invite someone else.
+
+**Eligibility:**
+
+- **Gender must match.** A Chłopcy event needs two boys. Refuse and explain.
+- The tournament must have a `Gra podwójna` event.
+- Age category is **not** enforced — younger players routinely play up.
+
+---
+
+## Status display
+
+A `/moje_zaproszenia` command lists everything for this player:
+
+- 🟠 pending — name, tournament, date
+- 🟢 accepted — partner, tournament, date
+- 🔴 rejected — name, tournament
 
 ---
 
 ## Data sources
 
-All PZT pages are plain GET. No login, no JavaScript rendering, no ViewState POST needed for default views.
+All PZT pages are plain GET. No login, no JavaScript.
 
-### Tournaments — four categories only
+### Tournaments — four junior categories
 
 | Category | Age | URL |
 |---|---|---|
@@ -52,24 +189,15 @@ All PZT pages are plain GET. No login, no JavaScript rendering, no ViewState POS
 | Kadeci | U16 | `https://portal.pzt.pl/Tournament.aspx?CategoryID=16` |
 | Juniorzy | U18 | `https://portal.pzt.pl/Tournament.aspx?CategoryID=18` |
 
-Adult categories (`CategoryID=19`) are **out of scope**. Do not scrape them.
+Adult categories (`CategoryID=19`) are out of scope.
 
-Each page returns upcoming tournaments only. Available fields:
+Fields captured: `guid`, `name`, `type_prefix`, `ranga`, `date_from`, `date_to`, `wojewodztwo`, `venue_address`, `entry_deadline`, `withdrawal_deadline`, `search_closes_at`, `has_doubles`, `events`.
 
-- Name and type prefix (`OTK`, `WTK`, `MW`, `OTK SS`)
-- `Ranga` (1–7)
-- Dates, format `Od: 2026.08.07 Do: 2026.08.09`
-- Województwo
-- `Termin zgłoszeń` — entry deadline (drives the 48h reminder, see Matching)
-- `Termin odwołań` — withdrawal deadline
-- `Rozgrywki` block listing events: `Kategoria: … Typ: Gra pojedyncza|Gra podwójna; Chłopcy|Dziewczęta; <draw format>`
-- Tournament GUID, extractable from the results link
+**Model events separately from tournaments** — one tournament has many events. Only events containing `Gra podwójna` matter. Four of eighteen live U18 tournaments have no doubles draw at all.
 
-**Critical:** many tournaments have no doubles draw at all. Only events containing `Gra podwójna` are relevant to this product. Model **events separately from tournaments** — one tournament has many events.
+**Known trap:** PZT serves `_light` variants of header CSS classes (`tournAppTopCent_B_light` etc.) for tournaments in certain states. Match header classes by **prefix**, never exact token, or dates silently return null.
 
-### Rankings — eight lists
-
-Gender is **not** in the tournament category. It lives inside each event as `Chłopcy` or `Dziewczęta`. Join category + event gender to select the ranking list:
+### Rankings — eight lists, `Sort=A` only
 
 | Category | Chłopcy | Dziewczęta |
 |---|---|---|
@@ -78,93 +206,62 @@ Gender is **not** in the tournament category. It lives inside each event as `Ch�
 | U16 | `M16` | `W16` |
 | U18 | `M18` | `W18` |
 
-URL pattern:
 ```
 https://portal.pzt.pl/Ranking.aspx?RCatID={code}&Sort=A&Year={YYYY}&Month={M}
 ```
 
-Rankings use `Sort=A` (alphabetical roster) only. **This is the player lookup table for registration.** There is no need to scrape player profile pages, and no need to also scrape `Sort=LP` — the alphabetical list already covers every player, and ranking position can be sorted from our own database.
+The alphabetical list carries `position` for every player, so `Sort=LP` is unnecessary — sort in the database instead.
 
-**Do not hardcode or increment Year/Month.** Scrape the index at `https://portal.pzt.pl/Ranking.aspx?RCatID=M` and follow the current *"lista X / YYYY"* links. PZT publishes on the first Wednesday of each month but can be late — guessing the month produces empty pages and silent data loss.
+Captured per player: `pzt_id`, `full_name`, `club`, `position`, `itf_note`.
 
----
+**Do not hardcode or increment Year/Month.** Scrape the index at `https://portal.pzt.pl/Ranking.aspx?RCatID=M` and follow the current *"lista X / YYYY"* links. PZT publishes on the first Wednesday monthly but is often late; guessing produces empty pages and silent data loss.
 
-## Registration flow
-
-1. Adult starts the bot, taps role: *rodzic / opiekun / trener*
-2. Adult types the player's full name
-3. Bot searches the alphabetical rosters and shows matches with club and ranking
-4. If several players share a name, adult disambiguates by PZT ID
-5. Player is linked to the account. Adult may add more players.
+**Known trap:** ITF badges concatenate into the name cell (`"Błuś AleksanderMiejsce 77 na listach ITF 18"`). Extract the name node's own text only; keep the badge as `itf_note`.
 
 ---
 
-## Matching engine
+## Scraper scheduling
 
-The part most likely to break. Be careful here.
+- **Tournaments:** 3× daily via GitHub Actions cron
+- **Rankings:** daily at 15:00 Europe/Warsaw during the first 10 days of each month, weekly otherwise. Each run reads the index first and re-scrapes the eight lists **only if the published month changed.**
 
-**Search states:** `OPEN` → `REQUESTED` → `MATCHED` | `REJECTED` | `EXPIRED`
-
-**Rules:**
-
-- One active search per `(player, event)`. Enforce with a unique constraint.
-- Maximum **2 outgoing requests** per player per tournament.
-- **First accept wins.** On acceptance, all other outgoing and incoming requests for both players in that event are cancelled with the notice *"Ten zawodnik znalazł już partnera."*
-- **Atomic locking is mandatory.** The match transaction must `SELECT … FOR UPDATE` both search rows, re-verify both are still unmatched, then commit. Without this you will eventually double-book a player and destroy trust in the bot.
-- Requests expire after 24h **or** at 10:00 (Europe/Warsaw) on the tournament start date, whichever comes first. Searches remain open until 10:00 on the tournament start date. `Termin zgłoszeń` is displayed and drives the 48h reminder but does not close a search.
-- Rejection is free and instant; the requester may immediately request someone else.
-
-**Eligibility:** two players may match only if — same tournament, same category, same gender event, and that event contains `Gra podwójna`.
-
-**Notifications:**
-
-- When a new player starts searching an event, **notify everyone already waiting there.** This is the key retention loop. With thin liquidity it is what turns a dead list into a match.
-- 48h before `Termin zgłoszeń`, remind anyone still unmatched.
+The bot always reads the newest available `(year, month)`. Older lists stay in the table.
 
 ---
 
 ## Monetisation — build now, enable later
 
-Everything is free at launch. Build the entitlement check anyway.
+Free at launch. Build the entitlement check anyway.
 
 ```
-accounts.plan            'free' | 'paid'
-accounts.searches_used   integer
-can_start_search(account, tournament) -> bool    # currently always returns True
+accounts.plan               'free' | 'paid'
+accounts.invitations_used   integer
+can_send_invitation(account, tournament) -> bool   # currently always True
 ```
 
-Every search creation must route through `can_start_search`. When paid tiers launch, exactly one function changes. Do not scatter quota logic through the codebase — retrofitting it into a live bot with real users is painful.
+Every invitation must route through `can_send_invitation`. When paid tiers launch, one function changes. Do not scatter quota logic through the codebase.
 
 ---
 
 ## Stack
 
-- Python 3.11+
-- `aiogram` 3 — Telegram
-- PostgreSQL
-- `httpx` + `selectolax` (or BeautifulSoup) — scraping
-- Scrapers run on **GitHub Actions cron**: tournaments 3× daily, rankings weekly
-- Bot runs on a small always-on VM
+- Python 3.11+, `aiogram` 3, PostgreSQL
+- `httpx` + `selectolax` for scraping
+- SQLAlchemy models, Alembic migrations
+- Scrapers on GitHub Actions cron; bot on a small always-on VM
 
----
-
-## Scraping etiquette
-
-PZT is a national federation, not an API provider. Treat their server with respect:
-
-- Rate limit to roughly **one request per 2 seconds**
-- Set a descriptive `User-Agent` including a contact email
-- Cache aggressively; never scrape more often than the data changes
-- Fail gracefully — if a page shape changes, log and alert rather than writing garbage to the database
+**Scraping etiquette:** rate limit to ~1 request per 2 seconds, descriptive `User-Agent` with a contact email, cache aggressively, fail loudly rather than writing garbage.
 
 ---
 
 ## Build order
 
-1. Tournament scraper with doubles-draw detection → database
-2. Ranking scraper, alphabetical (`Sort=A`) → database
-3. Bot skeleton: `/start`, role selection, player registration
-4. Tournament browsing — doubles events only, next 14 days, sorted by entry deadline
-5. Search creation and the waiting pool
-6. Request / accept / reject with atomic locking
-7. Notification and expiry jobs
+1. ~~Tournament scraper with doubles detection~~ **done**
+2. ~~Ranking scraper, alphabetical lists~~ **done**
+3. ~~Database schema and upserts~~ **done — needs revision for this spec**
+4. Registration by PZT ID
+5. Tournament selection by place
+6. Pre-invitation checks
+7. Invitation send / accept / reject with atomic locking
+8. Status view and notifications
+9. Non-user invite flow and the "they joined" callback
