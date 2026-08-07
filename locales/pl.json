@@ -15,14 +15,22 @@
     "error_try_later": "Wystąpił błąd. Spróbuj ponownie później."
   },
   "tournament_search": {
-    "ask_place": "Podaj miejscowość turnieju."
+    "ask_place": "Podaj miejscowość turnieju.",
+    "place_too_short": "Wpisz co najmniej 3 znaki, żeby zawęzić wyniki.",
+    "results": "Wybierz turniej:",
+    "no_place_matches": "Nie znaleziono turniejów dla tej miejscowości.",
+    "none_eligible": "Nie znaleziono żadnych turniejów spełniających kryteria w najbliższych 14 dniach.",
+    "show_more": "Pokaż więcej",
+    "show_all": "Pokaż wszystkie turnieje",
+    "change_place": "Zmień miejscowość",
+    "selected": "Turniej zaczyna się {date}."
   },
   "invitation": {
     "not_attending_invitee": "Odpowiedziałeś, że nie jedziesz na ten turniej.",
     "not_attending_inviter": "⚪ {name} nie jedzie na ten turniej."
   },
   "_temp_": {
-    "tournament_search_stub": "Wyszukiwanie turniejów jest w budowie. Wróć tu wkrótce!"
+    "partner_selection_stub": "Wybór partnera jest w budowie. Wróć tu wkrótce!"
   },
   "player": {
     "position_known": "{position}. w rankingu",

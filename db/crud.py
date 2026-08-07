@@ -20,6 +20,7 @@ reject transactions) is bot code, out of scope for this task.
 from __future__ import annotations
 
 import logging
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
@@ -44,6 +45,16 @@ logger = logging.getLogger(__name__)
 
 _AGE_CATEGORY_BY_LABEL = {c.label: c for c in AgeCategory}
 _GENDER_BY_LABEL = {g.value: g for g in Gender}
+
+# accounts.gender is the single-letter 'M'/'W' code bot.registration.derive_gender
+# stores (from a ranking-list code's own prefix); Event.gender is the scraped
+# Gender enum. This maps one to the other for the eligibility filter in
+# get_eligible_tournaments.
+_GENDER_BY_ACCOUNT_CODE = {"M": Gender.BOYS, "W": Gender.GIRLS}
+
+
+def gender_for_account_code(code: str) -> Gender:
+    return _GENDER_BY_ACCOUNT_CODE[code]
 
 
 async def upsert_tournament(session: AsyncSession, tournament: ScrapedTournament) -> Tournament | None:
@@ -285,6 +296,52 @@ async def get_rankings_for_player_in_period(
             Ranking.year == year,
             Ranking.month == month,
         )
+    )
+    return list(result.scalars().all())
+
+
+async def get_tournament_by_guid(session: AsyncSession, guid: str) -> Tournament | None:
+    result = await session.execute(select(Tournament).where(Tournament.guid == guid))
+    return result.scalar_one_or_none()
+
+
+async def get_eligible_tournaments(
+    session: AsyncSession, gender: Gender, today: date, now: datetime
+) -> list[Tournament]:
+    """Tournaments eligible for step 5's place search (CLAUDE.md,
+    "Tournament selection"): `date_from` within the next 14 days, the
+    search window still open, and at least one `Gra podwójna` event
+    matching `gender`. Age category is not filtered — juniors play up.
+
+    `today`/`now` are passed in rather than computed here: `today` should
+    be the Europe/Warsaw wall-clock date for the 14-day window, while
+    `search_closes_at` is already a UTC instant and compares directly
+    against `now` — see bot.tournament_search, which computes both.
+
+    An EXISTS subquery (rather than a join) is what keeps a tournament
+    with several matching doubles events from coming back more than once.
+    """
+    cutoff = today + timedelta(days=14)
+    has_matching_doubles_event = (
+        select(Event.id)
+        .where(
+            Event.tournament_guid == Tournament.guid,
+            Event.is_doubles.is_(True),
+            Event.gender == gender,
+        )
+        .exists()
+    )
+    result = await session.execute(
+        select(Tournament)
+        .where(
+            Tournament.date_from.is_not(None),
+            Tournament.date_from >= today,
+            Tournament.date_from <= cutoff,
+            Tournament.search_closes_at.is_not(None),
+            Tournament.search_closes_at > now,
+            has_matching_doubles_event,
+        )
+        .order_by(Tournament.date_from.asc(), func.coalesce(Tournament.venue_city, Tournament.wojewodztwo).asc())
     )
     return list(result.scalars().all())
 

@@ -2,8 +2,8 @@
 (CLAUDE.md, "Never commit secrets") and starts long polling.
 
 Registers one router per feature (CLAUDE.md build order step 4:
-registration; the tournament-search stub it hands off to). Later steps
-add routers here rather than growing these two.
+registration; step 5: tournament selection by place). Later steps add
+routers here rather than growing these two.
 """
 
 from __future__ import annotations
