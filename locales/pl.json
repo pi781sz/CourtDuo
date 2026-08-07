@@ -17,6 +17,10 @@
   "tournament_search": {
     "ask_place": "Podaj miejscowość turnieju."
   },
+  "invitation": {
+    "not_attending_invitee": "Odpowiedziałeś, że nie jedziesz na ten turniej.",
+    "not_attending_inviter": "⚪ {name} nie jedzie na ten turniej."
+  },
   "_temp_": {
     "tournament_search_stub": "Wyszukiwanie turniejów jest w budowie. Wróć tu wkrótce!"
   },

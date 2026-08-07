@@ -33,6 +33,13 @@ class Tournament(TimestampMixin, Base):
     date_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     wojewodztwo: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # Raw "Miejsce turnieju" row (display) and the town extracted from it
+    # (matching/button labels) — see scrapers.tournaments.parser.extract_city.
+    # "Miejsce rozgrywek" (wojewodztwo above) stays the only source for the
+    # region; it's too unreliable to also source the town from.
+    venue_address: Mapped[str | None] = mapped_column(String, nullable=True)
+    venue_city: Mapped[str | None] = mapped_column(String, nullable=True)
+
     # Naive, Europe/Warsaw local wall-clock time exactly as PZT renders it
     # (scrapers.tournaments.parser never attaches a tzinfo to these two).
     entry_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)

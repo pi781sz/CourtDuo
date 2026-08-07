@@ -112,6 +112,8 @@ class Tournament:
     withdrawal_deadline: datetime | None
     events: list[Event] = field(default_factory=list)
     source_url: str | None = None
+    venue_address: str | None = None
+    venue_city: str | None = None
 
     @property
     def doubles_events(self) -> list[Event]:
@@ -149,6 +151,8 @@ class Tournament:
             "date_from": self.date_from.isoformat() if self.date_from else None,
             "date_to": self.date_to.isoformat() if self.date_to else None,
             "wojewodztwo": self.wojewodztwo,
+            "venue_address": self.venue_address,
+            "venue_city": self.venue_city,
             "entry_deadline": self.entry_deadline.isoformat() if self.entry_deadline else None,
             "withdrawal_deadline": self.withdrawal_deadline.isoformat() if self.withdrawal_deadline else None,
             "search_closes_at": closes_at.isoformat() if closes_at else None,

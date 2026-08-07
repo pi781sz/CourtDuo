@@ -18,7 +18,7 @@ Every user is a junior player aged roughly 10–18.
 
 Do not implement anything that violates these. If a request would break one, say so instead of building it.
 
-1. **No free-text messaging between users. Ever.** Every interaction is inline keyboard buttons and pre-defined messages. No chat, no message relay, no "add a note" field. An invitation carries only: inviter name, tournament, date, and two buttons.
+1. **No free-text messaging between users. Ever.** Every interaction is inline keyboard buttons and pre-defined messages. No chat, no message relay, no "add a note" field. An invitation carries only: inviter name, tournament, date, and buttons — Zatwierdź, Odrzuć, and (per the spec change under "Invitation engine") Nie jadę na ten turniej.
 
 2. **The bot never looks up, stores, or displays a phone number.** In the "invite a non-user" flow the bot generates share text; the phone's own contact picker chooses the recipient. The bot never sees who it went to.
 
@@ -77,12 +77,14 @@ Adam Smith zaprasza Cię do gry podwójnej.
 <tournament name>
 <date>
 Uwaga: po akceptacji nie można zmienić partnera.
-[Zatwierdź]  [Odrzuć]
+[Zatwierdź]  [Odrzuć]  [Nie jadę na ten turniej]
 ```
 
 **On Zatwierdź** — both see 🟢 with tournament, date and partner name. Adam gets an alert: *"Peter Lorenz przyjął zaproszenie."*
 
 **On Odrzuć** — Peter sees 🔴 *"Odrzuciłeś zaproszenie od Adam Smith — <tournament>"*. Adam's status flips to 🔴 *odmowa* with the name and tournament.
+
+**On Nie jadę na ten turniej** — Peter sees *"Odpowiedziałeś, że nie jedziesz na ten turniej."* Adam's status flips to a neutral ⚪ *"Peter Lorenz nie jedzie na ten turniej."*, distinct from 🔴 *odmowa*. This closes that one invitation only — see "Spec change: a third invitation response" under Invitation engine.
 
 ### Scenario 2 — the invited player is not on CourtDuo
 
@@ -107,7 +109,7 @@ Skips registration entirely. `/start` goes straight to *"Podaj miejscowość tur
 
 **Never ask the player to type a tournament name.** Real names are unusable — one live U18 tournament is literally `WTK - 👋U18 chł🎾dz😀Uniejów😀turniej grupowy🥇🥈🥉`.
 
-The player types a **place** (city or województwo). The bot matches against `venue_address` and `wojewodztwo`, diacritic-insensitively, and shows matching tournaments as buttons labelled *place — date*.
+The player types a **place** (city or województwo). The bot matches against `venue_city` and `wojewodztwo`, diacritic-insensitively via `fold_diacritics`, and shows matching tournaments as buttons labelled *place — date*.
 
 Only show tournaments that:
 - start within the next 14 days
@@ -147,7 +149,7 @@ These checks are a courtesy, not a guarantee — the named player may accept som
 
 The part most likely to break. Be careful.
 
-**States:** `PENDING` → `ACCEPTED` | `REJECTED` | `CANCELLED` | `EXPIRED`
+**States:** `PENDING` → `ACCEPTED` | `REJECTED` | `NOT_ATTENDING` | `CANCELLED` | `EXPIRED`
 
 **Rules:**
 
@@ -157,12 +159,23 @@ The part most likely to break. Be careful.
 - **A confirmed match is locked.** Neither side can cancel or change partner. Both are warned of this *before* confirming — the inviter on the confirmation screen, the invitee in the invitation itself. *(Cancellation may be added later; do not build it now.)*
 - Invitations expire at **10:00 Europe/Warsaw on the tournament start date**, computed via `zoneinfo` and stored as UTC. Poland is UTC+2 in summer, UTC+1 in winter — never hardcode an offset.
 - Rejection is instant and free. The inviter may immediately invite someone else.
+- Responding "Nie jadę na ten turniej" is instant and free too, exactly like rejection — the inviter may immediately invite someone else. See "Spec change: a third invitation response" below.
 
 **Eligibility:**
 
 - **Gender must match.** A Chłopcy event needs two boys. Refuse and explain.
 - The tournament must have a `Gra podwójna` event.
 - Age category is **not** enforced — younger players routinely play up.
+
+**Spec change: a third invitation response.** *(Documented now; not built until step 7 — do not implement this yet.)*
+
+An invitation gets a third button alongside Zatwierdź and Odrzuć: **"Nie jadę na ten turniej"**.
+
+- `NOT_ATTENDING` closes that one invitation and nothing else.
+- It is explicitly **not** a stored fact about the player and the tournament: it must not block, hide or filter any future invitation to that player for that tournament. Players change their minds, enter late, and withdraw. Do not design a "not attending" table or flag — this is purely a terminal state on the one `Invitation` row.
+- The invitee sees: *"Odpowiedziałeś, że nie jedziesz na ten turniej."*
+- The inviter sees a neutral status, distinct from 🔴 odmowa: ⚪ *"Peter Lorenz nie jedzie na ten turniej."*
+- The inviter may immediately invite someone else, exactly as with rejection.
 
 ---
 
@@ -173,6 +186,7 @@ A `/moje_zaproszenia` command lists everything for this player:
 - 🟠 pending — name, tournament, date
 - 🟢 accepted — partner, tournament, date
 - 🔴 rejected — name, tournament
+- ⚪ not attending *(spec change, not built until step 7)* — name, tournament
 
 ---
 
@@ -191,7 +205,7 @@ All PZT pages are plain GET. No login, no JavaScript.
 
 Adult categories (`CategoryID=19`) are out of scope.
 
-Fields captured: `guid`, `name`, `type_prefix`, `ranga`, `date_from`, `date_to`, `wojewodztwo`, `venue_address`, `entry_deadline`, `withdrawal_deadline`, `search_closes_at`, `has_doubles`, `events`.
+Fields captured: `guid`, `name`, `type_prefix`, `age_category`, `ranga`, `date_from`, `date_to`, `wojewodztwo`, `venue_address`, `venue_city`, `entry_deadline`, `withdrawal_deadline`, `search_closes_at`, `events`. Doubles is not a tournament column — it's `events.is_doubles`, found by joining to the tournament's events.
 
 **Model events separately from tournaments** — one tournament has many events. Only events containing `Gra podwójna` matter. Four of eighteen live U18 tournaments have no doubles draw at all.
 

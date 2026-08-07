@@ -88,7 +88,12 @@ WOJEWODZTWA = {
 LABEL_TERMIN_ZGLOSZEN = "Termin zgłoszeń"
 LABEL_TERMIN_ODWOLAN = "Termin odwołań"
 LABEL_MIEJSCE_ROZGRYWEK = "Miejsce rozgrywek"
+LABEL_MIEJSCE_TURNIEJU = "Miejsce turnieju"
 LABEL_ROZGRYWKI = "Rozgrywki"
+
+# Leading Polish postcode ("99-210 Uniejów...") stripped before extracting
+# the town from a "Miejsce turnieju" row.
+_POSTCODE_RE = re.compile(r"^\d{2}-\d{3}\s*")
 
 _TOURNAMENT_SELECTOR = "div.tournAppContainer_B"
 
@@ -204,6 +209,47 @@ def _parse_wojewodztwo(row: Node | None) -> str | None:
     return None
 
 
+def _parse_venue_address(row: Node | None) -> str | None:
+    """Extracts the raw "Miejsce turnieju" text — the actual address PZT
+    prints (town, street), unlike the unreliable "Miejsce rozgrywek" row
+    (see _parse_wojewodztwo). Absent entirely on some tournaments.
+
+    "Miejsce turnieju" renders twice per tournament (summary block and
+    Informacje tab); `rows` is in document order, and `_find_row` already
+    returns the first match, which is what we want here.
+    """
+    if row is None:
+        return None
+    value_node = _row_value_node(row)
+    if value_node is None:
+        return None
+    text = value_node.text(separator=" ", strip=True)
+    return text or None
+
+
+def _title_case_word(word: str) -> str:
+    return "-".join(part.capitalize() for part in word.split("-"))
+
+
+def extract_city(raw: str) -> str | None:
+    """Extracts a town name from a "Miejsce turnieju" row's raw text.
+
+    Order of operations (CLAUDE.md, "Tournament selection"):
+    strip a leading postcode, take everything before the first comma (or
+    the whole string if there's none), strip emoji/symbols, collapse
+    whitespace, then Title Case each word. Deliberately does not validate
+    against a list of Polish towns — there is no reliable list, and a
+    wrong one would silently drop real tournaments.
+    """
+    text = _POSTCODE_RE.sub("", raw.strip())
+    text = text.split(",", 1)[0]
+    text = "".join(ch for ch in text if ch.isalpha() or ch.isspace() or ch == "-")
+    text = re.sub(r"\s+", " ", text).strip()
+    if not text:
+        return None
+    return " ".join(_title_case_word(word) for word in text.split(" "))
+
+
 def _truncate_draw_format(raw: str) -> str:
     cut_at = len(raw)
     for marker in _DRAW_FORMAT_CUT_MARKERS:
@@ -291,6 +337,8 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
     entry_deadline = _parse_datetime_row(_find_row(rows, LABEL_TERMIN_ZGLOSZEN))
     withdrawal_deadline = _parse_datetime_row(_find_row(rows, LABEL_TERMIN_ODWOLAN))
     wojewodztwo = _parse_wojewodztwo(_find_row(rows, LABEL_MIEJSCE_ROZGRYWEK))
+    venue_address = _parse_venue_address(_find_row(rows, LABEL_MIEJSCE_TURNIEJU))
+    venue_city = extract_city(venue_address) if venue_address else None
     events = _parse_events(_find_row(rows, LABEL_ROZGRYWKI))
 
     if not events:
@@ -313,6 +361,8 @@ def _parse_tournament_block(node: Node, age_category: AgeCategory, source_url: s
         withdrawal_deadline=withdrawal_deadline,
         events=events,
         source_url=source_url,
+        venue_address=venue_address,
+        venue_city=venue_city,
     )
 
 

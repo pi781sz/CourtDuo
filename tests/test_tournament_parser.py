@@ -12,7 +12,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from scrapers.tournaments.models import AgeCategory, Gender, PlayType, Tournament
-from scrapers.tournaments.parser import find_tournament_html_at, parse_category_page
+from scrapers.tournaments.parser import extract_city, find_tournament_html_at, parse_category_page
 
 # Mirrors a real tournament block: Termin odwołań as a table
 # (.tournAppContentColR_B_p0 / td.tournAppContentTdEntryFee), a
@@ -170,6 +170,14 @@ def test_first_tournament_fields():
     assert t.date_to.isoformat() == "2026-08-09"
     assert t.wojewodztwo == "lubuskie"
     assert t.guid == "C949F78A-765D-4A49-8D2B-18267DB752F3"
+    assert t.venue_address == "65-001 Zielona Gora, Testowa 1"
+    assert t.venue_city == "Zielona Gora"
+
+
+def test_venue_address_absent_returns_none_without_crashing():
+    t = parse_category_page(SAMPLE_PAGE, AgeCategory.JUNIORZY, "https://example/test")[1]
+    assert t.venue_address is None
+    assert t.venue_city is None
 
 
 def test_entry_deadline_is_a_datetime():
@@ -213,7 +221,7 @@ def test_removed_fields_are_gone_from_dataclass_and_json():
     import json
 
     t = parse_category_page(SAMPLE_PAGE, AgeCategory.JUNIORZY, "https://example/test")[0]
-    for removed in ("director", "entry_fee", "court_surface", "court_count", "organiser", "venue_address"):
+    for removed in ("director", "entry_fee", "court_surface", "court_count", "organiser"):
         assert not hasattr(t, removed)
     payload = json.dumps(t.to_dict(), ensure_ascii=False)
     assert "director" not in payload
@@ -221,7 +229,6 @@ def test_removed_fields_are_gone_from_dataclass_and_json():
     assert "court_surface" not in payload
     assert "court_count" not in payload
     assert "organiser" not in payload
-    assert "venue_address" not in payload
 
 
 def test_to_dict_is_json_serializable():
@@ -479,3 +486,40 @@ def test_find_tournament_html_at_returns_block_by_index():
 def test_find_tournament_html_at_out_of_range_returns_none():
     page = "<html><body>" + TOURNAMENT_WITH_TABLE_ODWOLANIA + "</body></html>"
     assert find_tournament_html_at(page, 5) is None
+
+
+# extract_city -- every real "Miejsce turnieju" example verified against
+# live U18 HTML on 2026-08-07 (CLAUDE.md, "Tournament selection"), plus a
+# bare town with no postcode/comma and a string reducing to nothing.
+def test_extract_city_strips_postcode_and_takes_town_before_comma():
+    assert extract_city("99-210 Uniejów, ul. Sportowa obok Kompleksu⚽️⚽️im. Wł. Smolarka") == "Uniejów"
+
+
+def test_extract_city_strips_postcode_lodz():
+    assert extract_city("91-404 Łódź, Lumumby 22/26 (dojazd od ulicy Styrskiej)") == "Łódź"
+
+
+def test_extract_city_zielona_gora_no_diacritics_in_source():
+    assert extract_city("65-001 Zielona Gora, Wojska Polskiego 84A") == "Zielona Gora"
+
+
+def test_extract_city_multiword_town_survives_intact():
+    assert extract_city("05-825 Grodzisk Mazowiecki, Jowisza, Kozerki 92") == "Grodzisk Mazowiecki"
+
+
+def test_extract_city_lowercase_input_title_cased():
+    assert extract_city("62-010 pobiedziska, różana 4a") == "Pobiedziska"
+
+
+def test_extract_city_uppercase_input_title_cased():
+    assert extract_city("RYBNIK, Podmiejska 43") == "Rybnik"
+
+
+def test_extract_city_bare_town_no_postcode_no_comma():
+    assert extract_city("Kołobrzeg") == "Kołobrzeg"
+    assert extract_city("Lublin") == "Lublin"
+
+
+def test_extract_city_nothing_usable_returns_none():
+    assert extract_city("12-345") is None
+    assert extract_city("⚽️\U0001f600") is None
