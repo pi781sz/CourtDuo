@@ -27,6 +27,15 @@ class Account(TimestampMixin, Base):
         String, ForeignKey("players.pzt_id", ondelete="CASCADE"), unique=True, nullable=False
     )
 
+    # Snapshotted at registration rather than read through the `player`
+    # relationship: a player who drops off every monthly ranking list
+    # keeps their CourtDuo name/gender exactly as registered, instead of
+    # silently going stale alongside whatever Player.full_name last was.
+    # 'M' or 'W' — see bot.registration; display strings ("Chłopcy",
+    # "Dziewczęta") live in locales/pl.json, not here.
+    full_name: Mapped[str] = mapped_column(String, nullable=False)
+    gender: Mapped[str] = mapped_column(String(1), nullable=False)
+
     # CLAUDE.md, "Monetisation — build now, enable later": every invitation
     # creation must route through db.crud.can_send_invitation rather than
     # reading these columns directly.

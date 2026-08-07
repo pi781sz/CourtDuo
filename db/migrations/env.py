@@ -15,7 +15,7 @@ from alembic import context
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from db.models import Base  # noqa: E402
-from db.session import get_database_url  # noqa: E402
+from db.session import get_connect_args, get_database_url  # noqa: E402
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -75,6 +75,7 @@ async def run_async_migrations() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        connect_args=get_connect_args(),
     )
 
     async with connectable.connect() as connection:

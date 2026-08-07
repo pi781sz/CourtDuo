@@ -1,8 +1,9 @@
 """Bot entrypoint. Reads BOT_TOKEN/DATABASE_URL from the environment
 (CLAUDE.md, "Never commit secrets") and starts long polling.
 
-No routers are registered yet — the invitation-flow handlers are future
-work (CLAUDE.md, "Build order" items 4+), not part of this schema change.
+Registers one router per feature (CLAUDE.md build order step 4:
+registration; the tournament-search stub it hands off to). Later steps
+add routers here rather than growing these two.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
+from bot.handlers import start_router, tournament_search_router
 from bot.middlewares.db import DbSessionMiddleware
 
 load_dotenv()
@@ -37,8 +39,14 @@ async def main() -> None:
     dispatcher.message.middleware(db_middleware)
     dispatcher.callback_query.middleware(db_middleware)
 
-    await bot.delete_webhook(drop_pending_updates=True)
-    await dispatcher.start_polling(bot)
+    dispatcher.include_router(start_router)
+    dispatcher.include_router(tournament_search_router)
+
+    try:
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dispatcher.start_polling(bot)
+    finally:
+        await bot.session.close()
 
 
 if __name__ == "__main__":
