@@ -216,16 +216,40 @@ An invitation gets a third button alongside Zatwierdź and Odrzuć: **"Nie jadę
 
 ---
 
-## Status display
+## Status display — "Moje deble"
 
-A `/moje_zaproszenia` command lists everything for this player:
+One place a player sees every invitation they have sent or received, and what happened to it. Reachable two ways: the `/moje_deble` command, and a "Moje deble" button carried by every terminal message (see "A terminal message always carries a way back" below) and by the age-category screen.
 
-- ⚪ pending — name, tournament, date
-- 🟢 accepted — partner, tournament, date
-- 🔴 rejected — name, tournament
-- 🟠 not attending *(spec change, not built until step 7)* — name, tournament
+Group by tournament, ordered by tournament date ascending. Within a tournament, matched first, then everything else by most recent.
 
-**A terminal message always carries a way back.** "Never dead-end" (see "Tournament selection") applies to notifications, not just search results: any message that ends a flow — a rejection, a "nie jedzie" notice, a "ten zawodnik znalazł już partnera" cancellation, the match confirmation both players get on Zatwierdź — carries a "Znajdź partnera" button that returns the player straight to the age-category screen. `/start` must never be the only way forward.
+```
+WTK Uniejów - 22.08.2026
+🟢 Partner: Jagoda Szewczyk
+
+OTK Zielona Góra - 29.08.2026
+⚪ Maja Nowak — wysłane
+🔴 Bartosz Nowak — odmowa
+🟠 Wiktoria Wójcik — nie jedzie
+```
+
+Colours:
+
+- ⚪ pending
+- 🟢 matched
+- 🔴 rejected
+- 🟠 not attending
+
+Both directions are shown — invitations this player sent and ones they received — and wording makes clear which is which: a sent line reads `{name} — wysłane`/`odmowa`/`nie jedzie`; a received line is prefixed `Zaproszenie od {name} —` so it never reads like a sent one. A matched line is symmetric regardless of who invited whom.
+
+A received invitation still pending is actionable from here: it carries the Zatwierdź / Odrzuć / "Nie jadę na ten turniej" buttons, reusing step 7's own callback classes and handlers unchanged — a player who dismissed the original notification is not stuck hunting for it.
+
+**What it hides.** Only tournaments that have not finished. Use `date_to` where present, otherwise `date_from`; a tournament is over at the end of that day, Europe/Warsaw. Nothing is deleted from the database — this is a display filter only, so past invitations stay available for the results-based verification planned later. Invitations cancelled automatically when someone else accepted are noise, not history, and are never listed — the player was already told at the time.
+
+**Empty state.** If there is nothing to show, say so plainly and offer "Znajdź partnera" (not "Moje deble" — that would point back at the same empty screen).
+
+**Never** reveals who a third party's partner is — only this player's own matches. If another player is matched with someone else at a tournament, this view never names that someone else.
+
+**A terminal message always carries a way back.** "Never dead-end" (see "Tournament selection") applies to notifications, not just search results: any message that ends a flow — a rejection, a "nie jedzie" notice, a "ten zawodnik znalazł już partnera" cancellation, the match confirmation both players get on Zatwierdź, an invitation just sent — carries both a "Moje deble" and a "Znajdź partnera" button, the latter returning the player straight to the age-category screen. The age-category screen carries both too. `/start` must never be the only way forward.
 
 ---
 
@@ -316,5 +340,5 @@ Every invitation must route through `can_send_invitation`. When paid tiers launc
 5. Tournament selection by place
 6. Pre-invitation checks
 7. Invitation send / accept / reject with atomic locking
-8. Status view and notifications
+8. ~~Status view and notifications~~ **done**
 9. Non-user invite flow and the "they joined" callback

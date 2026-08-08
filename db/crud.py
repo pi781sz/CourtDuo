@@ -30,6 +30,7 @@ from datetime import date, datetime, timedelta
 from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from scrapers.rankings.models import RankingEntry as ScrapedRankingEntry
 from scrapers.tournaments.models import Event as ScrapedEvent
@@ -514,6 +515,29 @@ async def get_doubles_event(session: AsyncSession, tournament_guid: str, gender:
 async def get_invitation_by_id(session: AsyncSession, invitation_id: int) -> Invitation | None:
     result = await session.execute(select(Invitation).where(Invitation.id == invitation_id))
     return result.scalar_one_or_none()
+
+
+async def get_invitations_for_player(session: AsyncSession, pzt_id: str) -> list[Invitation]:
+    """Every invitation `pzt_id` appears in, on either side, in any state
+    (CLAUDE.md, "Moje deble" status view; build order step 8). Eagerly
+    loads the tournament and both players' names, since bot.moje_deble
+    renders every row without issuing a query per row.
+
+    Nothing is filtered here beyond "involves this player" -- which states
+    are shown and which tournaments have finished are display decisions
+    left to bot.moje_deble, per CLAUDE.md: "Nothing is deleted from the
+    database — this is a display filter only."
+    """
+    result = await session.execute(
+        select(Invitation)
+        .options(
+            selectinload(Invitation.tournament),
+            selectinload(Invitation.inviter),
+            selectinload(Invitation.invitee),
+        )
+        .where(or_(Invitation.inviter_pzt_id == pzt_id, Invitation.invitee_pzt_id == pzt_id))
+    )
+    return list(result.scalars().all())
 
 
 def _advisory_lock_key(inviter_pzt_id: str, tournament_guid: str) -> int:

@@ -14,6 +14,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.i18n import t
+from bot.keyboards.navigation import FindPartnerCallback, MojeDebleCallback
 from bot.tournament_search import (
     CATEGORY_ORDER,
     TournamentOption,
@@ -53,6 +54,10 @@ def category_keyboard(counts: dict[AgeCategory, int], lang: str) -> InlineKeyboa
         else:
             text = t("tournament_search.category_unavailable", lang, category=short)
         builder.button(text=text, callback_data=CategorySelectCallback(category=category.name))
+    # CLAUDE.md build order step 8: "Add 'Moje deble' alongside 'Znajdź
+    # partnera' on the age-category screen too."
+    builder.button(text=t("common.moje_deble_button", lang), callback_data=MojeDebleCallback())
+    builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
     builder.adjust(2)
     return builder.as_markup()
 

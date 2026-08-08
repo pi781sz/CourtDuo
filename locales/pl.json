@@ -1,6 +1,7 @@
 {
   "commands": {
-    "start": "Zacznij"
+    "start": "Zacznij",
+    "moje_deble": "Moje deble"
   },
   "start": {
     "greeting": "Cześć! 🎾 CourtDuo pomoże Ci znaleźć partnera do debla.",
@@ -97,6 +98,18 @@
   },
   "common": {
     "unknown_club": "brak klubu",
-    "find_partner_button": "Znajdź partnera"
+    "find_partner_button": "Znajdź partnera",
+    "moje_deble_button": "Moje deble"
+  },
+  "moje_deble": {
+    "empty": "Nie masz jeszcze żadnych zaproszeń.",
+    "not_registered": "Zacznij od komendy /start, aby się zarejestrować.",
+    "matched": "🟢 Partner: {name}",
+    "sent_pending": "⚪ {name} — wysłane",
+    "sent_rejected": "🔴 {name} — odmowa",
+    "sent_not_attending": "🟠 {name} — nie jedzie",
+    "received_pending": "⚪ Zaproszenie od {name} — oczekuje na Twoją odpowiedź",
+    "received_rejected": "🔴 Zaproszenie od {name} — Twoja odpowiedź: odrzucone",
+    "received_not_attending": "🟠 Zaproszenie od {name} — Twoja odpowiedź: nie jadę"
   }
 }

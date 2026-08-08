@@ -1,0 +1,342 @@
+"""Tests for bot.moje_deble's pure filtering, grouping and rendering logic
+(CLAUDE.md, "Moje deble" status view; build order step 8): the day-boundary
+rule, direction, ordering, and the exact wording. No database -- see
+tests/test_moje_deble_db.py for the crud query and the full handler flow.
+Invented names, pzt_ids and tournament guids only.
+
+Invitation/Player/Tournament rows are constructed directly (no session) --
+a plain ORM object with its relationships set by hand needs no database
+connection, the same trick tests/test_invitation_handlers_db.py's
+_add_tournament/_add_user helpers rely on for the DB-backed tests.
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+
+from bot.moje_deble import (
+    Direction,
+    entry_from_invitation,
+    entry_line,
+    group_by_tournament,
+    pending_received_entries,
+    render_groups,
+    tournament_finished,
+    visible_entries,
+)
+from db.models import Invitation, InvitationState, Player, Tournament
+
+_LANG = "pl"
+
+
+def _tournament(guid: str, date_from: date | None, date_to: date | None = None, venue_city: str = "Testowo") -> Tournament:
+    return Tournament(
+        guid=guid,
+        name="Turniej testowy",
+        type_prefix=None,
+        age_category=None,
+        ranga=5,
+        date_from=date_from,
+        date_to=date_to,
+        wojewodztwo=None,
+        venue_address=None,
+        venue_city=venue_city,
+        entry_deadline=None,
+        withdrawal_deadline=None,
+        search_closes_at=None,
+    )
+
+
+def _player(pzt_id: str, full_name: str) -> Player:
+    return Player(pzt_id=pzt_id, full_name=full_name, club=None, age_category=None, gender=None)
+
+
+def _invitation(
+    invitation_id: int,
+    inviter: Player,
+    invitee: Player,
+    tournament: Tournament,
+    state: InvitationState,
+    updated_at: datetime,
+) -> Invitation:
+    invitation = Invitation(
+        id=invitation_id,
+        inviter_pzt_id=inviter.pzt_id,
+        invitee_pzt_id=invitee.pzt_id,
+        tournament_guid=tournament.guid,
+        event_id=1,
+        state=state,
+        expires_at=updated_at,
+    )
+    invitation.inviter = inviter
+    invitation.invitee = invitee
+    invitation.tournament = tournament
+    invitation.updated_at = updated_at
+    return invitation
+
+
+_T0 = datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc)
+
+
+# --- tournament_finished ------------------------------------------------------
+
+
+def test_tournament_finished_uses_date_to_when_present():
+    assert tournament_finished(date(2026, 8, 1), date(2026, 8, 3), today=date(2026, 8, 4)) is True
+    assert tournament_finished(date(2026, 8, 1), date(2026, 8, 3), today=date(2026, 8, 3)) is False
+
+
+def test_tournament_finished_falls_back_to_date_from():
+    assert tournament_finished(date(2026, 8, 1), None, today=date(2026, 8, 2)) is True
+    assert tournament_finished(date(2026, 8, 1), None, today=date(2026, 8, 1)) is False
+
+
+def test_tournament_finished_never_true_with_no_dates_at_all():
+    assert tournament_finished(None, None, today=date(2026, 8, 1)) is False
+
+
+def test_tournament_finished_day_boundary_is_the_whole_day_not_a_utc_instant():
+    # A tournament ending 2026-08-01 is still not finished at any point
+    # during 2026-08-01 Europe/Warsaw wall-clock time -- the caller is
+    # responsible for passing a Warsaw date, not a UTC one; this just
+    # checks the comparison itself doesn't sneak in an earlier cutoff.
+    assert tournament_finished(date(2026, 8, 1), date(2026, 8, 1), today=date(2026, 8, 1)) is False
+    assert tournament_finished(date(2026, 8, 1), date(2026, 8, 1), today=date(2026, 8, 2)) is True
+
+
+# --- entry_from_invitation / direction ----------------------------------------
+
+
+def test_entry_from_invitation_sent_direction():
+    anna = _player("P001", "Testowa Anna")
+    jagoda = _player("P002", "Testowa Jagoda")
+    tournament = _tournament("g1", date(2026, 8, 22))
+    invitation = _invitation(1, anna, jagoda, tournament, InvitationState.PENDING, _T0)
+
+    entry = entry_from_invitation(invitation, viewer_pzt_id="P001")
+
+    assert entry.direction is Direction.SENT
+    assert entry.other_full_name == "Testowa Jagoda"
+
+
+def test_entry_from_invitation_received_direction():
+    anna = _player("P001", "Testowa Anna")
+    jagoda = _player("P002", "Testowa Jagoda")
+    tournament = _tournament("g1", date(2026, 8, 22))
+    invitation = _invitation(1, anna, jagoda, tournament, InvitationState.PENDING, _T0)
+
+    entry = entry_from_invitation(invitation, viewer_pzt_id="P002")
+
+    assert entry.direction is Direction.RECEIVED
+    assert entry.other_full_name == "Testowa Anna"
+
+
+# --- visible_entries: state and finished-tournament filters -------------------
+
+
+def test_visible_entries_excludes_cancelled_and_expired():
+    anna = _player("P010", "Testowa Anna")
+    jagoda = _player("P011", "Testowa Jagoda")
+    tournament = _tournament("g10", date(2026, 8, 22))
+    invitations = [
+        _invitation(1, anna, jagoda, tournament, InvitationState.CANCELLED, _T0),
+        _invitation(2, anna, jagoda, tournament, InvitationState.EXPIRED, _T0),
+        _invitation(3, anna, jagoda, tournament, InvitationState.PENDING, _T0),
+    ]
+
+    entries = visible_entries(invitations, "P010", today=date(2026, 8, 1))
+
+    assert [entry.invitation_id for entry in entries] == [3]
+
+
+def test_visible_entries_excludes_finished_tournaments():
+    anna = _player("P020", "Testowa Anna")
+    jagoda = _player("P021", "Testowa Jagoda")
+    finished = _tournament("g20", date(2026, 7, 1), date(2026, 7, 2))
+    ongoing = _tournament("g21", date(2026, 8, 1), date(2026, 8, 3))
+    invitations = [
+        _invitation(1, anna, jagoda, finished, InvitationState.PENDING, _T0),
+        _invitation(2, anna, jagoda, ongoing, InvitationState.PENDING, _T0),
+    ]
+
+    entries = visible_entries(invitations, "P020", today=date(2026, 8, 2))
+
+    assert [entry.invitation_id for entry in entries] == [2]
+
+
+# --- group_by_tournament: ordering ---------------------------------------------
+
+
+def test_groups_are_ordered_by_tournament_date_ascending():
+    anna = _player("P030", "Testowa Anna")
+    jagoda = _player("P031", "Testowa Jagoda")
+    later = _tournament("late", date(2026, 9, 1))
+    earlier = _tournament("early", date(2026, 8, 1))
+    invitations = [
+        _invitation(1, anna, jagoda, later, InvitationState.PENDING, _T0),
+        _invitation(2, anna, jagoda, earlier, InvitationState.PENDING, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P030", today=date(2026, 7, 1), lang=_LANG)
+
+    assert [group.tournament_guid for group in groups] == ["early", "late"]
+
+
+def test_matched_sorts_first_within_a_tournament():
+    anna = _player("P040", "Testowa Anna")
+    jagoda = _player("P041", "Testowa Jagoda")
+    ola = _player("P042", "Testowa Ola")
+    tournament = _tournament("g40", date(2026, 8, 22))
+    invitations = [
+        _invitation(1, anna, jagoda, tournament, InvitationState.PENDING, _T0),
+        _invitation(2, anna, ola, tournament, InvitationState.ACCEPTED, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P040", today=date(2026, 8, 1), lang=_LANG)
+
+    assert [entry.invitation_id for entry in groups[0].entries] == [2, 1]
+
+
+def test_within_a_tournament_non_matched_entries_sort_most_recent_first():
+    from datetime import timedelta
+
+    anna = _player("P050", "Testowa Anna")
+    jagoda = _player("P051", "Testowa Jagoda")
+    ola = _player("P052", "Testowa Ola")
+    tournament = _tournament("g50", date(2026, 8, 22))
+    invitations = [
+        _invitation(1, anna, jagoda, tournament, InvitationState.REJECTED, _T0),
+        _invitation(2, anna, ola, tournament, InvitationState.PENDING, _T0 + timedelta(hours=1)),
+    ]
+
+    groups = group_by_tournament(invitations, "P050", today=date(2026, 8, 1), lang=_LANG)
+
+    assert [entry.invitation_id for entry in groups[0].entries] == [2, 1]
+
+
+# --- entry_line / render_groups: wording ---------------------------------------
+
+
+def test_sent_pending_wording_matches_claude_md_example():
+    # PZT stores "Nazwisko Imię" (surname first); display goes through
+    # display_name(), so "Testowa Maja" (as stored) reads as "Maja
+    # Testowa" in the rendered line -- CLAUDE.md, step 7.1, "Name order".
+    anna = _player("P060", "Testowa Anna")
+    maja = _player("P061", "Testowa Maja")
+    tournament = _tournament("g60", date(2026, 8, 29))
+    invitation = _invitation(1, anna, maja, tournament, InvitationState.PENDING, _T0)
+    entry = entry_from_invitation(invitation, viewer_pzt_id="P060")
+
+    assert entry_line(entry, _LANG) == "⚪ Maja Testowa — wysłane"
+
+
+def test_sent_rejected_and_not_attending_wording_matches_claude_md_example():
+    anna = _player("P070", "Testowa Anna")
+    bartosz = _player("P071", "Testowy Bartosz")
+    wiktoria = _player("P072", "Testowa Wiktoria")
+    tournament = _tournament("g70", date(2026, 8, 29))
+
+    rejected = entry_from_invitation(
+        _invitation(1, anna, bartosz, tournament, InvitationState.REJECTED, _T0), "P070"
+    )
+    not_attending = entry_from_invitation(
+        _invitation(2, anna, wiktoria, tournament, InvitationState.NOT_ATTENDING, _T0), "P070"
+    )
+
+    assert entry_line(rejected, _LANG) == "🔴 Bartosz Testowy — odmowa"
+    assert entry_line(not_attending, _LANG) == "🟠 Wiktoria Testowa — nie jedzie"
+
+
+def test_received_pending_reads_differently_from_sent_pending():
+    # CLAUDE.md: "'Maja Nowak — wysłane' and an invitation FROM Maja are
+    # different things" -- a received pending line must not read the same
+    # as a sent one.
+    anna = _player("P080", "Testowa Anna")
+    maja = _player("P081", "Testowa Maja")
+    tournament = _tournament("g80", date(2026, 8, 29))
+    invitation = _invitation(1, maja, anna, tournament, InvitationState.PENDING, _T0)
+
+    entry = entry_from_invitation(invitation, viewer_pzt_id="P080")
+    line = entry_line(entry, _LANG)
+
+    assert entry.direction is Direction.RECEIVED
+    assert line != "⚪ Maja Testowa — wysłane"
+    assert "Maja Testowa" in line
+
+
+def test_matched_wording_is_symmetric_regardless_of_direction():
+    anna = _player("P090", "Testowa Anna")
+    jagoda = _player("P091", "Testowa Jagoda")
+    tournament = _tournament("g90", date(2026, 8, 22))
+    invitation = _invitation(1, anna, jagoda, tournament, InvitationState.ACCEPTED, _T0)
+
+    as_inviter = entry_line(entry_from_invitation(invitation, "P090"), _LANG)
+    as_invitee = entry_line(entry_from_invitation(invitation, "P091"), _LANG)
+
+    assert as_inviter == "🟢 Partner: Jagoda Testowa"
+    assert as_invitee == "🟢 Partner: Anna Testowa"
+
+
+def test_render_groups_matches_claude_md_layout():
+    anna = _player("P100", "Testowa Anna")
+    maja = _player("P101", "Testowa Maja")
+    bartosz = _player("P102", "Testowy Bartosz")
+    wiktoria = _player("P103", "Testowa Wiktoria")
+    tournament = _tournament("g100", date(2026, 8, 29), venue_city="Zielona Góra")
+    tournament.ranga = 3  # OTK
+    invitations = [
+        _invitation(1, anna, maja, tournament, InvitationState.PENDING, _T0),
+        _invitation(2, anna, bartosz, tournament, InvitationState.REJECTED, _T0),
+        _invitation(3, anna, wiktoria, tournament, InvitationState.NOT_ATTENDING, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P100", today=date(2026, 8, 1), lang=_LANG)
+    text = render_groups(groups, _LANG)
+
+    assert text == (
+        "OTK Zielona Góra - 29.08.2026\n"
+        "⚪ Maja Testowa — wysłane\n"
+        "🔴 Bartosz Testowy — odmowa\n"
+        "🟠 Wiktoria Testowa — nie jedzie"
+    )
+
+
+def test_render_groups_separates_tournaments_with_a_blank_line():
+    anna = _player("P110", "Testowa Anna")
+    jagoda = _player("P111", "Testowa Jagoda")
+    t1 = _tournament("g110a", date(2026, 8, 1), venue_city="A")
+    t2 = _tournament("g110b", date(2026, 9, 1), venue_city="B")
+    invitations = [
+        _invitation(1, anna, jagoda, t1, InvitationState.PENDING, _T0),
+        _invitation(2, anna, jagoda, t2, InvitationState.PENDING, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P110", today=date(2026, 7, 1), lang=_LANG)
+    text = render_groups(groups, _LANG)
+
+    assert "\n\n" in text
+    blocks = text.split("\n\n")
+    assert len(blocks) == 2
+
+
+# --- pending_received_entries: what gets action buttons ------------------------
+
+
+def test_pending_received_entries_only_open_received_invitations():
+    anna = _player("P120", "Testowa Anna")
+    jagoda = _player("P121", "Testowa Jagoda")
+    ola = _player("P122", "Testowa Ola")
+    tournament = _tournament("g120", date(2026, 8, 22))
+    invitations = [
+        # Anna sent to Jagoda (sent, pending) -- not actionable here.
+        _invitation(1, anna, jagoda, tournament, InvitationState.PENDING, _T0),
+        # Ola sent to Anna (received, pending) -- actionable.
+        _invitation(2, ola, anna, tournament, InvitationState.PENDING, _T0),
+        # Already matched -- not pending, not actionable.
+        _invitation(3, anna, jagoda, tournament, InvitationState.ACCEPTED, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P120", today=date(2026, 8, 1), lang=_LANG)
+    pending = pending_received_entries(groups)
+
+    assert [entry.invitation_id for entry in pending] == [2]
