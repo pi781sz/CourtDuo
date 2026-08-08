@@ -1,11 +1,16 @@
-"""Tournament selection by place (CLAUDE.md, "Tournament selection";
-build order step 5). A registered player types a town or województwo and
-gets back tappable tournament buttons, one per matching tournament;
-tapping one hands off to step 6 via bot.partner_selection.
+"""Tournament selection: age category first, then place (CLAUDE.md,
+"Tournament selection"; build order step 5, revised by step 5.1). A
+registered player taps one of the four age-category buttons, then types a
+town or województwo and gets back tappable tournament buttons, one per
+matching tournament; tapping one hands off to step 6 via
+bot.partner_selection.
+
+start_tournament_search() is the entry point step 4 calls after a
+successful registration and on /start for an already registered player.
 
 The pure matching/labelling/pagination logic lives in
 bot.tournament_search so it can be unit-tested without a database; this
-module is Telegram plumbing around it.
+module is Telegram + database plumbing around it.
 """
 
 from __future__ import annotations
@@ -20,10 +25,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.keyboards.tournament_search import (
+    CategorySelectCallback,
+    ChangeCategoryCallback,
     ChangePlaceCallback,
     ShowAllTournamentsCallback,
     TournamentPageCallback,
     TournamentSelectCallback,
+    category_keyboard,
     no_matches_keyboard,
     results_keyboard,
 )
@@ -36,10 +44,11 @@ from bot.tournament_search import (
     match_by_place,
     meets_min_place_length,
     paginate,
-    start_tournament_search,
+    selection_confirmation_text,
     to_option,
 )
 from db import crud
+from db.models import AgeCategory, Gender
 
 router = Router(name="tournament_search")
 
@@ -47,18 +56,29 @@ _WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 
 
 def _warsaw_today_and_utc_now() -> tuple[datetime, datetime]:
-    """(today, now) for get_eligible_tournaments: `today` is the
-    Europe/Warsaw wall-clock date the 14-day window counts from,
+    """(today, now) for the eligibility queries: `today` is the
+    Europe/Warsaw wall-clock date the eligibility window counts from,
     `now` is the UTC instant search_closes_at compares against."""
     now = datetime.now(timezone.utc)
     return now.astimezone(_WARSAW_TZ).date(), now
 
 
-async def _eligible_options(session: AsyncSession, gender_code: str) -> list[TournamentOption]:
+async def _category_counts(session: AsyncSession, gender: Gender) -> dict[AgeCategory, int]:
     today, now = _warsaw_today_and_utc_now()
-    gender = crud.gender_for_account_code(gender_code)
-    tournaments = await crud.get_eligible_tournaments(session, gender, today, now)
+    return await crud.get_eligible_tournament_counts_by_category(session, gender, today, now)
+
+
+async def _eligible_options(
+    session: AsyncSession, gender: Gender, age_category: AgeCategory
+) -> list[TournamentOption]:
+    today, now = _warsaw_today_and_utc_now()
+    tournaments = await crud.get_eligible_tournaments(session, gender, age_category, today, now)
     return [to_option(tournament) for tournament in tournaments]
+
+
+async def _send_category_prompt(message: Message, session: AsyncSession, gender: Gender, lang: str) -> None:
+    counts = await _category_counts(session, gender)
+    await message.answer(t("tournament_search.ask_category", lang), reply_markup=category_keyboard(counts, lang))
 
 
 async def _send_results(message: Message, options: list[TournamentOption], offset: int, lang: str) -> None:
@@ -67,25 +87,64 @@ async def _send_results(message: Message, options: list[TournamentOption], offse
     await message.answer(t("tournament_search.results", lang), reply_markup=keyboard)
 
 
-async def _edit_to_results(callback: CallbackQuery, options: list[TournamentOption], offset: int, lang: str) -> None:
+async def _edit_to_results(
+    callback: CallbackQuery, options: list[TournamentOption], offset: int, lang: str
+) -> None:
     page, has_more = paginate(options, offset)
     keyboard = results_keyboard(page, has_more, offset + PAGE_SIZE, lang)
     await callback.message.edit_text(t("tournament_search.results", lang), reply_markup=keyboard)
+
+
+async def start_tournament_search(
+    message: Message, state: FSMContext, lang: str, session: AsyncSession, gender: Gender
+) -> None:
+    await state.update_data(category=None, place=None)
+    await _send_category_prompt(message, session, gender, lang)
+    await state.set_state(TournamentSearch.waiting_category)
+
+
+@router.callback_query(CategorySelectCallback.filter(), TournamentSearch.waiting_category)
+async def handle_category(
+    callback: CallbackQuery, callback_data: CategorySelectCallback, state: FSMContext, session: AsyncSession
+) -> None:
+    account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
+    lang = lang_for(account)
+    gender = crud.gender_for_account_code(account.gender)
+    category = AgeCategory[callback_data.category]
+
+    counts = await _category_counts(session, gender)
+    if not counts.get(category, 0):
+        # Re-verified at tap time, not just at render time (CLAUDE.md step
+        # 5.1: "Tapping it re-shows the four buttons; it must never lead
+        # to the place prompt and a dead end").
+        await callback.message.edit_reply_markup(reply_markup=category_keyboard(counts, lang))
+        await callback.answer()
+        return
+
+    await state.update_data(category=category.name, place=None)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await callback.message.answer(t("tournament_search.ask_place", lang))
+    await state.set_state(TournamentSearch.waiting_place)
+    await callback.answer()
 
 
 @router.message(TournamentSearch.waiting_place)
 async def handle_place(message: Message, state: FSMContext, session: AsyncSession) -> None:
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     lang = lang_for(account)
+    gender = crud.gender_for_account_code(account.gender)
     place = (message.text or "").strip()
 
     if not meets_min_place_length(place):
         await message.answer(t("tournament_search.place_too_short", lang))
         return
 
-    eligible = await _eligible_options(session, account.gender)
+    data = await state.get_data()
+    category = AgeCategory[data["category"]]
+
+    eligible = await _eligible_options(session, gender, category)
     if not eligible:
-        await message.answer(t("tournament_search.none_eligible", lang))
+        await message.answer(t("tournament_search.none_eligible", lang, days=crud.ELIGIBILITY_WINDOW_DAYS))
         return
 
     matches = match_by_place(eligible, place)
@@ -101,9 +160,13 @@ async def handle_place(message: Message, state: FSMContext, session: AsyncSessio
 async def handle_show_all(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
+    gender = crud.gender_for_account_code(account.gender)
+
+    data = await state.get_data()
+    category = AgeCategory[data["category"]]
 
     await state.update_data(place="")
-    eligible = await _eligible_options(session, account.gender)
+    eligible = await _eligible_options(session, gender, category)
     await _edit_to_results(callback, eligible, offset=0, lang=lang)
     await callback.answer()
 
@@ -114,10 +177,12 @@ async def handle_page(
 ) -> None:
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
+    gender = crud.gender_for_account_code(account.gender)
 
     data = await state.get_data()
+    category = AgeCategory[data["category"]]
     place = data.get("place") or ""
-    eligible = await _eligible_options(session, account.gender)
+    eligible = await _eligible_options(session, gender, category)
     options = match_by_place(eligible, place) if place else eligible
 
     await _edit_to_results(callback, options, offset=callback_data.offset, lang=lang)
@@ -129,9 +194,24 @@ async def handle_change_place(callback: CallbackQuery, state: FSMContext, sessio
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
 
+    # Keeps the chosen category (CLAUDE.md step 5.1, "Navigation").
     await state.update_data(place=None)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await start_tournament_search(callback.message, state, lang)
+    await callback.message.answer(t("tournament_search.ask_place", lang))
+    await callback.answer()
+
+
+@router.callback_query(ChangeCategoryCallback.filter(), TournamentSearch.waiting_place)
+async def handle_change_category(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
+    account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
+    lang = lang_for(account)
+    gender = crud.gender_for_account_code(account.gender)
+
+    # Clears the chosen category (CLAUDE.md step 5.1, "Navigation").
+    await state.update_data(category=None, place=None)
+    await callback.message.edit_reply_markup(reply_markup=None)
+    await _send_category_prompt(callback.message, session, gender, lang)
+    await state.set_state(TournamentSearch.waiting_category)
     await callback.answer()
 
 
@@ -141,14 +221,29 @@ async def handle_select(
 ) -> None:
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
+    gender = crud.gender_for_account_code(account.gender)
 
     tournament = await crud.get_tournament_by_guid(session, callback_data.guid)
+    await callback.message.edit_reply_markup(reply_markup=None)
+
     if tournament is None or tournament.date_from is None:
+        # A re-scrape deleted it between listing and tap (CLAUDE.md step
+        # 5.1, "the silent no-op"): say so, then re-show current results
+        # instead of leaving a dead button on screen.
         await callback.answer()
+        await callback.message.answer(t("tournament_search.tournament_gone", lang))
+        data = await state.get_data()
+        category = AgeCategory[data["category"]]
+        place = data.get("place") or ""
+        eligible = await _eligible_options(session, gender, category)
+        options = match_by_place(eligible, place) if place else eligible
+        await _send_results(callback.message, options, offset=0, lang=lang)
         return
 
     await state.update_data(tournament_guid=tournament.guid)
-    await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(t("tournament_search.selected", lang, date=f"{tournament.date_from:%Y.%m.%d}"))
+    confirmation = selection_confirmation_text(
+        tournament.venue_city, tournament.wojewodztwo, tournament.age_category, tournament.date_from, lang
+    )
+    await callback.message.answer(confirmation)
     await callback.answer()
     await start_partner_selection(callback.message, state, lang)

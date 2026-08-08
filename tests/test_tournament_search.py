@@ -1,7 +1,9 @@
-"""Tests for bot.tournament_search's pure logic: place matching, button
-labels, and pagination (CLAUDE.md, "Tournament selection"; build order
-step 5). No database — see tests/test_tournament_search_db.py for the
-eligibility query itself. Invented tournament guids/cities only.
+"""Tests for bot.tournament_search's pure logic: category ordering/
+labelling, place matching, button labels, the selection confirmation
+message, and pagination (CLAUDE.md, "Tournament selection"; build order
+step 5, revised by step 5.1). No database — see
+tests/test_tournament_search_db.py for the eligibility queries
+themselves. Invented tournament guids/cities only.
 """
 
 from __future__ import annotations
@@ -9,13 +11,18 @@ from __future__ import annotations
 from datetime import date
 
 from bot.tournament_search import (
+    CATEGORY_ORDER,
     PAGE_SIZE,
     TournamentOption,
+    category_is_available,
+    category_short_label,
     match_by_place,
     meets_min_place_length,
     paginate,
+    selection_confirmation_text,
     tournament_label,
 )
+from db.models import AgeCategory
 
 UNIEJOW = TournamentOption(guid="t-uniejow", date_from=date(2026, 8, 29), venue_city="Uniejów", wojewodztwo="łódzkie")
 ZIELONA_GORA = TournamentOption(
@@ -106,3 +113,56 @@ def test_paginate_exact_page_size_has_no_more():
     page, has_more = paginate(options, offset=0)
     assert len(page) == PAGE_SIZE
     assert has_more is False
+
+
+def test_category_order_is_all_four_youngest_first():
+    # CLAUDE.md step 5.1: "all four are always offered" -- never filtered
+    # or reordered by the player's own age.
+    assert CATEGORY_ORDER == (
+        AgeCategory.SKRZATY,
+        AgeCategory.MLODZICY,
+        AgeCategory.KADECI,
+        AgeCategory.JUNIORZY,
+    )
+
+
+def test_category_short_label_is_u_form_not_enum_name():
+    assert category_short_label(AgeCategory.SKRZATY, "pl") == "U12"
+    assert category_short_label(AgeCategory.MLODZICY, "pl") == "U14"
+    assert category_short_label(AgeCategory.KADECI, "pl") == "U16"
+    assert category_short_label(AgeCategory.JUNIORZY, "pl") == "U18"
+
+
+def test_category_is_available_true_when_count_positive():
+    counts = {AgeCategory.MLODZICY: 3}
+    assert category_is_available(counts, AgeCategory.MLODZICY) is True
+
+
+def test_category_is_available_false_when_absent_or_zero():
+    counts = {AgeCategory.MLODZICY: 0}
+    assert category_is_available(counts, AgeCategory.MLODZICY) is False
+    assert category_is_available(counts, AgeCategory.SKRZATY) is False
+
+
+def test_selection_confirmation_contains_town_category_and_date():
+    text = selection_confirmation_text(
+        venue_city="Grodzisk Mazowiecki",
+        wojewodztwo="mazowieckie",
+        category=AgeCategory.MLODZICY,
+        date_from=date(2026, 8, 8),
+        lang="pl",
+    )
+    assert "Grodzisk Mazowiecki" in text
+    assert "U14" in text
+    assert "2026.08.08" in text
+
+
+def test_selection_confirmation_falls_back_to_wojewodztwo_when_venue_city_is_null():
+    text = selection_confirmation_text(
+        venue_city=None,
+        wojewodztwo="mazowieckie",
+        category=AgeCategory.JUNIORZY,
+        date_from=date(2026, 8, 8),
+        lang="pl",
+    )
+    assert "mazowieckie" in text

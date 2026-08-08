@@ -1,8 +1,10 @@
-"""Tests for db.crud.get_eligible_tournaments against a real Postgres
-(see tests/conftest.py -- skipped cleanly when TEST_DATABASE_URL is
-unset). CLAUDE.md, "Tournament selection": date_from within 14 days,
-search window still open, gender-matching Gra podwójna event required.
-Invented guids/names/cities only.
+"""Tests for db.crud.get_eligible_tournaments and
+get_eligible_tournament_counts_by_category against a real Postgres (see
+tests/conftest.py -- skipped cleanly when TEST_DATABASE_URL is unset).
+CLAUDE.md, "Tournament selection": age category chosen first, date_from
+within ELIGIBILITY_WINDOW_DAYS days, search window still open,
+gender-matching Gra podwójna event required. Invented guids/names/cities
+only.
 """
 
 from __future__ import annotations
@@ -24,12 +26,13 @@ def _make_tournament(
     search_closes_at: datetime | None,
     venue_city: str | None = "Testowo",
     wojewodztwo: str | None = "testowe",
+    age_category: AgeCategory = AgeCategory.JUNIORZY,
 ) -> Tournament:
     return Tournament(
         guid=guid,
         name=f"Turniej testowy {guid}",
         type_prefix="OTK",
-        age_category=AgeCategory.JUNIORZY,
+        age_category=age_category,
         ranga=None,
         date_from=date_from,
         date_to=date_from,
@@ -60,7 +63,7 @@ async def test_eligible_tournament_is_returned(db_session: AsyncSession):
     db_session.add(_make_event("t1", Gender.BOYS))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert [t.guid for t in result] == ["t1"]
 
@@ -72,7 +75,7 @@ async def test_gender_mismatch_is_excluded(db_session: AsyncSession):
     db_session.add(_make_event("t1", Gender.GIRLS))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert result == []
 
@@ -84,19 +87,49 @@ async def test_singles_only_tournament_is_excluded(db_session: AsyncSession):
     db_session.add(_make_event("t1", Gender.BOYS, is_doubles=False))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert result == []
 
 
-async def test_date_outside_14_day_window_is_excluded(db_session: AsyncSession):
-    tournament = _make_tournament("t1", date(2026, 8, 22), _NOW + timedelta(hours=1))
+async def test_age_category_mismatch_is_excluded(db_session: AsyncSession):
+    # Step 5.1: choosing a category then a place must return only that
+    # category's tournaments.
+    juniorzy = _make_tournament("juniorzy", date(2026, 8, 10), _NOW + timedelta(hours=1), age_category=AgeCategory.JUNIORZY)
+    skrzaty = _make_tournament("skrzaty", date(2026, 8, 10), _NOW + timedelta(hours=1), age_category=AgeCategory.SKRZATY)
+    db_session.add_all([juniorzy, skrzaty])
+    await db_session.flush()
+    db_session.add(_make_event("juniorzy", Gender.BOYS))
+    db_session.add(_make_event("skrzaty", Gender.BOYS))
+    await db_session.flush()
+
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
+
+    assert [t.guid for t in result] == ["juniorzy"]
+
+
+async def test_date_at_window_boundary_is_included(db_session: AsyncSession):
+    boundary = _TODAY + timedelta(days=crud.ELIGIBILITY_WINDOW_DAYS)
+    tournament = _make_tournament("t1", boundary, _NOW + timedelta(hours=1))
     db_session.add(tournament)
     await db_session.flush()
     db_session.add(_make_event("t1", Gender.BOYS))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
+
+    assert [t.guid for t in result] == ["t1"]
+
+
+async def test_date_one_day_past_window_boundary_is_excluded(db_session: AsyncSession):
+    past_boundary = _TODAY + timedelta(days=crud.ELIGIBILITY_WINDOW_DAYS + 1)
+    tournament = _make_tournament("t1", past_boundary, _NOW + timedelta(hours=1))
+    db_session.add(tournament)
+    await db_session.flush()
+    db_session.add(_make_event("t1", Gender.BOYS))
+    await db_session.flush()
+
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert result == []
 
@@ -108,7 +141,7 @@ async def test_date_from_before_today_is_excluded(db_session: AsyncSession):
     db_session.add(_make_event("t1", Gender.BOYS))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert result == []
 
@@ -120,7 +153,7 @@ async def test_search_window_already_closed_is_excluded(db_session: AsyncSession
     db_session.add(_make_event("t1", Gender.BOYS))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert result == []
 
@@ -132,7 +165,7 @@ async def test_null_venue_city_still_eligible(db_session: AsyncSession):
     db_session.add(_make_event("t1", Gender.GIRLS))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.GIRLS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.GIRLS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert [t.guid for t in result] == ["t1"]
     assert result[0].venue_city is None
@@ -146,7 +179,7 @@ async def test_tournament_with_multiple_matching_events_returned_once(db_session
     db_session.add(_make_event("t1", Gender.BOYS, is_doubles=False))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert [t.guid for t in result] == ["t1"]
 
@@ -160,7 +193,7 @@ async def test_results_sorted_by_date_from_ascending(db_session: AsyncSession):
     db_session.add(_make_event("earlier", Gender.BOYS))
     await db_session.flush()
 
-    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, _TODAY, _NOW)
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
 
     assert [t.guid for t in result] == ["earlier", "later"]
 
@@ -176,3 +209,41 @@ async def test_get_tournament_by_guid_found_and_missing(db_session: AsyncSession
     assert found is not None
     assert found.guid == "t1"
     assert missing is None
+
+
+async def test_category_counts_respect_gender(db_session: AsyncSession):
+    # Step 5.1: category availability must respect gender -- a category
+    # empty for one gender can still be available for the other.
+    boys_only = _make_tournament(
+        "boys-only", date(2026, 8, 10), _NOW + timedelta(hours=1), age_category=AgeCategory.JUNIORZY
+    )
+    girls_only = _make_tournament(
+        "girls-only", date(2026, 8, 10), _NOW + timedelta(hours=1), age_category=AgeCategory.MLODZICY
+    )
+    db_session.add_all([boys_only, girls_only])
+    await db_session.flush()
+    db_session.add(_make_event("boys-only", Gender.BOYS))
+    db_session.add(_make_event("girls-only", Gender.GIRLS))
+    await db_session.flush()
+
+    boys_counts = await crud.get_eligible_tournament_counts_by_category(db_session, Gender.BOYS, _TODAY, _NOW)
+    girls_counts = await crud.get_eligible_tournament_counts_by_category(db_session, Gender.GIRLS, _TODAY, _NOW)
+
+    assert boys_counts.get(AgeCategory.JUNIORZY) == 1
+    assert boys_counts.get(AgeCategory.MLODZICY, 0) == 0
+    assert girls_counts.get(AgeCategory.MLODZICY) == 1
+    assert girls_counts.get(AgeCategory.JUNIORZY, 0) == 0
+
+
+async def test_category_counts_group_multiple_tournaments(db_session: AsyncSession):
+    a = _make_tournament("a", date(2026, 8, 10), _NOW + timedelta(hours=1), age_category=AgeCategory.KADECI)
+    b = _make_tournament("b", date(2026, 8, 12), _NOW + timedelta(hours=1), age_category=AgeCategory.KADECI)
+    db_session.add_all([a, b])
+    await db_session.flush()
+    db_session.add(_make_event("a", Gender.BOYS))
+    db_session.add(_make_event("b", Gender.BOYS))
+    await db_session.flush()
+
+    counts = await crud.get_eligible_tournament_counts_by_category(db_session, Gender.BOYS, _TODAY, _NOW)
+
+    assert counts.get(AgeCategory.KADECI) == 2

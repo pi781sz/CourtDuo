@@ -43,6 +43,12 @@ from .models import (
 
 logger = logging.getLogger(__name__)
 
+# CLAUDE.md, "Tournament selection": how far ahead a tournament's
+# date_from may be and still be offered. The single source of truth for
+# this — get_eligible_tournaments, get_eligible_tournament_counts_by_category
+# and their tests all import it rather than repeating the day count.
+ELIGIBILITY_WINDOW_DAYS = 28
+
 _AGE_CATEGORY_BY_LABEL = {c.label: c for c in AgeCategory}
 _GENDER_BY_LABEL = {g.value: g for g in Gender}
 
@@ -306,22 +312,23 @@ async def get_tournament_by_guid(session: AsyncSession, guid: str) -> Tournament
 
 
 async def get_eligible_tournaments(
-    session: AsyncSession, gender: Gender, today: date, now: datetime
+    session: AsyncSession, gender: Gender, age_category: AgeCategory, today: date, now: datetime
 ) -> list[Tournament]:
     """Tournaments eligible for step 5's place search (CLAUDE.md,
-    "Tournament selection"): `date_from` within the next 14 days, the
-    search window still open, and at least one `Gra podwójna` event
-    matching `gender`. Age category is not filtered — juniors play up.
+    "Tournament selection"): matching `age_category` (step 5.1 asks for
+    this first, before place), `date_from` within the next
+    ELIGIBILITY_WINDOW_DAYS days, the search window still open, and at
+    least one `Gra podwójna` event matching `gender`.
 
     `today`/`now` are passed in rather than computed here: `today` should
-    be the Europe/Warsaw wall-clock date for the 14-day window, while
+    be the Europe/Warsaw wall-clock date the window counts from, while
     `search_closes_at` is already a UTC instant and compares directly
-    against `now` — see bot.tournament_search, which computes both.
+    against `now` — see bot.handlers.tournament_search, which computes both.
 
     An EXISTS subquery (rather than a join) is what keeps a tournament
     with several matching doubles events from coming back more than once.
     """
-    cutoff = today + timedelta(days=14)
+    cutoff = today + timedelta(days=ELIGIBILITY_WINDOW_DAYS)
     has_matching_doubles_event = (
         select(Event.id)
         .where(
@@ -334,6 +341,7 @@ async def get_eligible_tournaments(
     result = await session.execute(
         select(Tournament)
         .where(
+            Tournament.age_category == age_category,
             Tournament.date_from.is_not(None),
             Tournament.date_from >= today,
             Tournament.date_from <= cutoff,
@@ -344,6 +352,41 @@ async def get_eligible_tournaments(
         .order_by(Tournament.date_from.asc(), func.coalesce(Tournament.venue_city, Tournament.wojewodztwo).asc())
     )
     return list(result.scalars().all())
+
+
+async def get_eligible_tournament_counts_by_category(
+    session: AsyncSession, gender: Gender, today: date, now: datetime
+) -> dict[AgeCategory, int]:
+    """How many eligible tournaments each age category has, for the step
+    5.1 category-choice screen (CLAUDE.md, "Tournament selection") — one
+    grouped query rather than one `get_eligible_tournaments` call per
+    category. Same eligibility rules as `get_eligible_tournaments` minus
+    the age_category filter itself. A category absent from the returned
+    dict has zero eligible tournaments.
+    """
+    cutoff = today + timedelta(days=ELIGIBILITY_WINDOW_DAYS)
+    has_matching_doubles_event = (
+        select(Event.id)
+        .where(
+            Event.tournament_guid == Tournament.guid,
+            Event.is_doubles.is_(True),
+            Event.gender == gender,
+        )
+        .exists()
+    )
+    result = await session.execute(
+        select(Tournament.age_category, func.count(Tournament.guid))
+        .where(
+            Tournament.date_from.is_not(None),
+            Tournament.date_from >= today,
+            Tournament.date_from <= cutoff,
+            Tournament.search_closes_at.is_not(None),
+            Tournament.search_closes_at > now,
+            has_matching_doubles_event,
+        )
+        .group_by(Tournament.age_category)
+    )
+    return {age_category: count for age_category, count in result.all()}
 
 
 async def can_send_invitation(account: Account, tournament: Tournament) -> bool:
