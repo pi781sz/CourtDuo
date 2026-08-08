@@ -523,3 +523,84 @@ def test_extract_city_bare_town_no_postcode_no_comma():
 def test_extract_city_nothing_usable_returns_none():
     assert extract_city("12-345") is None
     assert extract_city("⚽️\U0001f600") is None
+
+
+# Step 5.2 "venue_city bleed" — a comma-less town name (Kołobrzeg, Lublin,
+# Poznań) has nothing to cut the trailing "Uwagi:" pollution at, unlike e.g.
+# "99-210 Uniejów, ..." which happens to be cut at its own comma first.
+def test_extract_city_truncates_at_uwagi_label():
+    assert (
+        extract_city("Kołobrzeg Uwagi: 78-100 Kołobrzeg, Gen. Władysława Sikorskiego 1 www baltictenisclub.com")
+        == "Kołobrzeg"
+    )
+
+
+def test_extract_city_bare_town_lublin_and_poznan_unaffected():
+    assert extract_city("Lublin") == "Lublin"
+    assert extract_city("Poznań") == "Poznań"
+
+
+def test_extract_city_truncates_at_other_pzt_labels_case_insensitive():
+    assert extract_city("Kraków email: kontakt@klub.pl") == "Kraków"
+    assert extract_city("Warszawa TEL.: 123-456-789") == "Warszawa"
+    assert extract_city("Gdańsk Miejsce rozgrywek: Korty przy ul. Testowej") == "Gdańsk"
+    assert extract_city("Łódź Termin zgłoszeń: 2026-08-01") == "Łódź"
+    assert extract_city("Poznań Organizator: KT Testowy") == "Poznań"
+    assert extract_city("Radom Dyrektor turnieju: Jan Kowalski") == "Radom"
+    assert extract_city("Opole Turniej gł.: 2026-08-07") == "Opole"
+
+
+# Mirrors the live bug: PZT nests a trailing "Uwagi:" note as a child
+# element inside the same "Miejsce turnieju" value cell, rather than as a
+# separate row. Node.text() recurses into descendants by default, so
+# without deep=False the address absorbs the nested note — this is the
+# "real fix" from step 5.2 (a), bounding the value to its own row.
+TOURNAMENT_VENUE_UWAGI_IN_SAME_CELL = """
+<div class="tournAppContainer_B">
+  <div class="tournAppTopMain1_B">
+    <div class="tournAppTopMain2_B">
+      <div class="tournAppTop_B" onclick="ToggleDisplay(8);">
+        <div class="tournAppTopLeft_B_1">
+          <div class="tournAppTopLeft_B">
+            <div class="tournAppStatus_B"><div class="tournAppStatusNo"></div></div>
+            <div class="tournAppName_B">OTK Kołobrzeg</div>
+            <div class="tournAppRang_B_main">
+              <div class="tournAppRang_B"><div class="tournAppRangCount">3</div><div class="tournAppRangContent">Ranga</div></div>
+            </div>
+          </div>
+          <div class="tournAppTopCent_B">
+            <span style="margin-right: 20px;">Od: 2026.08.29</span>
+            Do: 2026.08.30
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tournAppContent_B" id="d8">
+    <div id="ctl00_dTournDetails8">
+      <div class="tournAppContentRow2_B">
+        <div class="tournAppContentColL_B">Miejsce turnieju</div>
+        <div class="tournAppContentColR_B">Kołobrzeg<div class="tournAppNotes">Uwagi: 78-100 Kołobrzeg, Gen. Władysława Sikorskiego 1 www baltictenisclub.com</div></div>
+      </div>
+      <div class="tournAppContentRow2_B">
+        <div class="tournAppContentColLBn_B">Rozgrywki</div>
+        <div class="tournAppContentColR_B dtlEvent">
+          <table><tbody>
+            <tr><td><div class="dDtlEventsMainCont1"><span class="tournAppEventsDescLeft">Kategoria: </span>Juniorzy - do 18 lat<br><div class="tournAppEventsDescLeft">Typ: </div><div class="tournAppEventsDescRight">Gra podwójna; Chłopcy; Grupowo-pucharowy 16</div></div></td></tr>
+          </tbody></table>
+        </div>
+      </div>
+      <a href="/TournamentResults.aspx?TournamentID=aabbccdd-1122-3344-5566-778899aabbcc" target="_blank">Szczegóły turnieju</a>
+    </div>
+  </div>
+</div>
+"""
+
+
+def test_venue_address_bounded_to_own_row_not_nested_uwagi_note():
+    tournaments = parse_category_page(
+        TOURNAMENT_VENUE_UWAGI_IN_SAME_CELL, AgeCategory.JUNIORZY, "https://example/test"
+    )
+    t = tournaments[0]
+    assert t.venue_address == "Kołobrzeg"
+    assert t.venue_city == "Kołobrzeg"

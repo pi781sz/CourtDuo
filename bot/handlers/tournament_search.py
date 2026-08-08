@@ -29,7 +29,6 @@ from bot.keyboards.tournament_search import (
     ChangeCategoryCallback,
     ChangePlaceCallback,
     ShowAllTournamentsCallback,
-    TournamentPageCallback,
     TournamentSelectCallback,
     category_keyboard,
     no_matches_keyboard,
@@ -39,11 +38,10 @@ from bot.lang import lang_for
 from bot.partner_selection import start_partner_selection
 from bot.states import TournamentSearch
 from bot.tournament_search import (
-    PAGE_SIZE,
     TournamentOption,
+    cap_results,
     match_by_place,
     meets_min_place_length,
-    paginate,
     selection_confirmation_text,
     to_option,
 )
@@ -81,18 +79,23 @@ async def _send_category_prompt(message: Message, session: AsyncSession, gender:
     await message.answer(t("tournament_search.ask_category", lang), reply_markup=category_keyboard(counts, lang))
 
 
-async def _send_results(message: Message, options: list[TournamentOption], offset: int, lang: str) -> None:
-    page, has_more = paginate(options, offset)
-    keyboard = results_keyboard(page, has_more, offset + PAGE_SIZE, lang)
-    await message.answer(t("tournament_search.results", lang), reply_markup=keyboard)
+def _results_text(capped: bool, lang: str) -> str:
+    text = t("tournament_search.results", lang)
+    if capped:
+        text = f"{text}\n\n{t('tournament_search.too_many_results', lang)}"
+    return text
 
 
-async def _edit_to_results(
-    callback: CallbackQuery, options: list[TournamentOption], offset: int, lang: str
-) -> None:
-    page, has_more = paginate(options, offset)
-    keyboard = results_keyboard(page, has_more, offset + PAGE_SIZE, lang)
-    await callback.message.edit_text(t("tournament_search.results", lang), reply_markup=keyboard)
+async def _send_results(message: Message, options: list[TournamentOption], lang: str) -> None:
+    page, capped = cap_results(options)
+    keyboard = results_keyboard(page, lang)
+    await message.answer(_results_text(capped, lang), reply_markup=keyboard)
+
+
+async def _edit_to_results(callback: CallbackQuery, options: list[TournamentOption], lang: str) -> None:
+    page, capped = cap_results(options)
+    keyboard = results_keyboard(page, lang)
+    await callback.message.edit_text(_results_text(capped, lang), reply_markup=keyboard)
 
 
 async def start_tournament_search(
@@ -153,7 +156,7 @@ async def handle_place(message: Message, state: FSMContext, session: AsyncSessio
         return
 
     await state.update_data(place=place)
-    await _send_results(message, matches, offset=0, lang=lang)
+    await _send_results(message, matches, lang=lang)
 
 
 @router.callback_query(ShowAllTournamentsCallback.filter(), TournamentSearch.waiting_place)
@@ -167,25 +170,7 @@ async def handle_show_all(callback: CallbackQuery, state: FSMContext, session: A
 
     await state.update_data(place="")
     eligible = await _eligible_options(session, gender, category)
-    await _edit_to_results(callback, eligible, offset=0, lang=lang)
-    await callback.answer()
-
-
-@router.callback_query(TournamentPageCallback.filter(), TournamentSearch.waiting_place)
-async def handle_page(
-    callback: CallbackQuery, callback_data: TournamentPageCallback, state: FSMContext, session: AsyncSession
-) -> None:
-    account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
-    lang = lang_for(account)
-    gender = crud.gender_for_account_code(account.gender)
-
-    data = await state.get_data()
-    category = AgeCategory[data["category"]]
-    place = data.get("place") or ""
-    eligible = await _eligible_options(session, gender, category)
-    options = match_by_place(eligible, place) if place else eligible
-
-    await _edit_to_results(callback, options, offset=callback_data.offset, lang=lang)
+    await _edit_to_results(callback, eligible, lang=lang)
     await callback.answer()
 
 
@@ -237,7 +222,7 @@ async def handle_select(
         place = data.get("place") or ""
         eligible = await _eligible_options(session, gender, category)
         options = match_by_place(eligible, place) if place else eligible
-        await _send_results(callback.message, options, offset=0, lang=lang)
+        await _send_results(callback.message, options, lang=lang)
         return
 
     await state.update_data(tournament_guid=tournament.guid)

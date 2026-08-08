@@ -14,7 +14,7 @@ from bot.i18n import t
 from core.text import fold_diacritics
 from db.models import AgeCategory, Tournament
 
-PAGE_SIZE = 8
+MAX_RESULTS = 40
 MIN_PLACE_LENGTH = 3
 
 # Display order for the four category buttons (CLAUDE.md step 5.1: "all
@@ -31,7 +31,7 @@ CATEGORY_ORDER: tuple[AgeCategory, ...] = (
 @dataclass(frozen=True)
 class TournamentOption:
     """The fields a tournament button needs, independent of the ORM row —
-    lets match_by_place/tournament_label/paginate be unit-tested with
+    lets match_by_place/tournament_label/cap_results be unit-tested with
     invented data and no database."""
 
     guid: str
@@ -107,8 +107,15 @@ def match_by_place(options: list[TournamentOption], place: str) -> list[Tourname
     return matches
 
 
-def paginate(options: list[TournamentOption], offset: int) -> tuple[list[TournamentOption], bool]:
-    """Returns (this page of at most PAGE_SIZE options, whether more remain)."""
-    page = options[offset : offset + PAGE_SIZE]
-    has_more = offset + PAGE_SIZE < len(options)
-    return page, has_more
+def cap_results(options: list[TournamentOption]) -> tuple[list[TournamentOption], bool]:
+    """Returns (options capped at MAX_RESULTS, whether the cap was hit).
+
+    Step 5.2 ("no pagination"): a single keyboard shows every eligible
+    tournament, with no "show more" paging. The cap is a guard against a
+    query bug ever producing a keyboard Telegram would reject, not a real
+    limit -- with age category and gender filtering, real lists are under
+    15.
+    """
+    if len(options) <= MAX_RESULTS:
+        return options, False
+    return options[:MAX_RESULTS], True

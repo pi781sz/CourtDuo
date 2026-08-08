@@ -1,9 +1,10 @@
 """Tests for bot.tournament_search's pure logic: category ordering/
 labelling, place matching, button labels, the selection confirmation
-message, and pagination (CLAUDE.md, "Tournament selection"; build order
-step 5, revised by step 5.1). No database — see
-tests/test_tournament_search_db.py for the eligibility queries
-themselves. Invented tournament guids/cities only.
+message, and the results cap (CLAUDE.md, "Tournament selection"; build
+order step 5, revised by step 5.1 and step 5.2 which removed pagination
+in favour of a single-keyboard result list with a 40-button safety cap).
+No database — see tests/test_tournament_search_db.py for the eligibility
+queries themselves. Invented tournament guids/cities only.
 """
 
 from __future__ import annotations
@@ -12,13 +13,13 @@ from datetime import date
 
 from bot.tournament_search import (
     CATEGORY_ORDER,
-    PAGE_SIZE,
+    MAX_RESULTS,
     TournamentOption,
+    cap_results,
     category_is_available,
     category_short_label,
     match_by_place,
     meets_min_place_length,
-    paginate,
     selection_confirmation_text,
     tournament_label,
 )
@@ -84,35 +85,33 @@ def test_tournament_label_falls_back_to_wojewodztwo_when_venue_city_is_null():
     assert tournament_label(NO_CITY) == "mazowieckie — 2026.08.20"
 
 
-def test_paginate_first_page_and_has_more():
-    options = [
-        TournamentOption(guid=f"t{i}", date_from=date(2026, 8, i + 1), venue_city="Miasto", wojewodztwo=None)
-        for i in range(1, 11)
+def _options(n: int) -> list[TournamentOption]:
+    return [
+        TournamentOption(guid=f"t{i}", date_from=date(2026, 8, 1), venue_city="Miasto", wojewodztwo=None)
+        for i in range(n)
     ]
-    page, has_more = paginate(options, offset=0)
-    assert len(page) == PAGE_SIZE
-    assert page == options[:PAGE_SIZE]
-    assert has_more is True
 
 
-def test_paginate_last_page_has_no_more():
-    options = [
-        TournamentOption(guid=f"t{i}", date_from=date(2026, 8, i + 1), venue_city="Miasto", wojewodztwo=None)
-        for i in range(1, 11)
-    ]
-    page, has_more = paginate(options, offset=PAGE_SIZE)
-    assert page == options[PAGE_SIZE:]
-    assert has_more is False
+def test_cap_results_under_cap_shows_everything_uncapped():
+    options = _options(12)
+    shown, capped = cap_results(options)
+    assert shown == options
+    assert capped is False
 
 
-def test_paginate_exact_page_size_has_no_more():
-    options = [
-        TournamentOption(guid=f"t{i}", date_from=date(2026, 8, i + 1), venue_city="Miasto", wojewodztwo=None)
-        for i in range(1, PAGE_SIZE + 1)
-    ]
-    page, has_more = paginate(options, offset=0)
-    assert len(page) == PAGE_SIZE
-    assert has_more is False
+def test_cap_results_at_cap_is_not_capped():
+    options = _options(MAX_RESULTS)
+    shown, capped = cap_results(options)
+    assert shown == options
+    assert capped is False
+
+
+def test_cap_results_over_cap_truncates_to_first_40_and_flags_capped():
+    options = _options(45)
+    shown, capped = cap_results(options)
+    assert shown == options[:MAX_RESULTS]
+    assert len(shown) == MAX_RESULTS == 40
+    assert capped is True
 
 
 def test_category_order_is_all_four_youngest_first():

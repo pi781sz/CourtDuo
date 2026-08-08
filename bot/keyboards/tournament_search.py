@@ -30,10 +30,6 @@ class TournamentSelectCallback(CallbackData, prefix="tsel"):
     guid: str
 
 
-class TournamentPageCallback(CallbackData, prefix="tpage"):
-    offset: int
-
-
 class ShowAllTournamentsCallback(CallbackData, prefix="tall"):
     pass
 
@@ -59,17 +55,10 @@ def category_keyboard(counts: dict[AgeCategory, int], lang: str) -> InlineKeyboa
     return builder.as_markup()
 
 
-def results_keyboard(
-    page: list[TournamentOption], has_more: bool, next_offset: int, lang: str
-) -> InlineKeyboardMarkup:
+def results_keyboard(options: list[TournamentOption], lang: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
-    for option in page:
+    for option in options:
         builder.button(text=tournament_label(option), callback_data=TournamentSelectCallback(guid=option.guid))
-    if has_more:
-        builder.button(
-            text=t("tournament_search.show_more", lang),
-            callback_data=TournamentPageCallback(offset=next_offset),
-        )
     builder.button(text=t("tournament_search.change_place", lang), callback_data=ChangePlaceCallback())
     builder.button(text=t("tournament_search.change_category", lang), callback_data=ChangeCategoryCallback())
     builder.adjust(1)
