@@ -37,11 +37,45 @@
     "selected": "Wybrany turniej: {place} {category} — {date}"
   },
   "invitation": {
-    "not_attending_invitee": "Odpowiedziałeś, że nie jedziesz na ten turniej.",
-    "not_attending_inviter": "⚪ {name} nie jedzie na ten turniej."
+    "confirm_partner": "Zaproszenie do: {name}",
+    "confirm_tournament": "Turniej: {tournament}",
+    "warning_cannot_change": "Uwaga: po akceptacji nie można zmienić partnera.",
+    "confirm_send_button": "Wyślij zaproszenie",
+    "confirm_cancel_button": "Anuluj",
+    "send_cancelled": "Zaproszenie nie zostało wysłane.",
+    "sent": "Zaproszenie zostało wysłane. Czekaj na odpowiedź.",
+    "status_pending": "🟠 {name} — {tournament}",
+    "status_matched": "🟢 Partner: {name} — {tournament}",
+    "received": "{name} zaprasza Cię do gry podwójnej.",
+    "accept_button": "Zatwierdź",
+    "reject_button": "Odrzuć",
+    "not_attending_button": "Nie jadę na ten turniej",
+    "accepted_inviter": {
+      "M": "{name} przyjął zaproszenie.",
+      "W": "{name} przyjęła zaproszenie."
+    },
+    "rejected_invitee": {
+      "M": "🔴 Odrzuciłeś zaproszenie od {name} — {tournament}.",
+      "W": "🔴 Odrzuciłaś zaproszenie od {name} — {tournament}."
+    },
+    "rejected_inviter": {
+      "M": "🔴 {name} odrzucił zaproszenie — {tournament}.",
+      "W": "🔴 {name} odrzuciła zaproszenie — {tournament}."
+    },
+    "not_attending_invitee": {
+      "M": "Odpowiedziałeś, że nie jedziesz na ten turniej.",
+      "W": "Odpowiedziałaś, że nie jedziesz na ten turniej."
+    },
+    "not_attending_inviter": "⚪ {name} nie jedzie na ten turniej.",
+    "partner_found_elsewhere": "Ten zawodnik znalazł już partnera.",
+    "no_longer_valid": "To zaproszenie jest już nieaktualne.",
+    "already_answered": "Na to zaproszenie już odpowiedziano.",
+    "expired": "To zaproszenie wygasło.",
+    "invitee_not_on_courtduo": "{name} nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby.",
+    "delivery_failed": "Nie udało się dostarczyć zaproszenia do {name}. Wpisz imię i nazwisko innej osoby."
   },
   "partner_selection": {
-    "ask_name": "Wpisz imię i nazwisko osoby, którą chcesz zaprosić.",
+    "ask_name": "Wpisz imię i nazwisko osoby, z którą chcesz grać.",
     "name_too_short": "Wpisz imię i nazwisko — dwa wyrazy.",
     "not_found": "Nie znaleziono takiego zawodnika. Sprawdź pisownię i spróbuj ponownie.",
     "too_many_matches": "Znaleziono zbyt wielu zawodników o takim imieniu i nazwisku. Sprawdź pisownię i spróbuj ponownie.",
@@ -56,9 +90,6 @@
     "pending_invitation_exists": "Zaproszenie do {name} zostało już wysłane. Czekaj na odpowiedź.",
     "max_pending_reached": "Masz już 3 oczekujące zaproszenia na ten turniej. Poczekaj na odpowiedź, zanim zaprosisz kogoś nowego.",
     "cannot_send_invitation": "Nie możesz teraz wysłać zaproszenia. Spróbuj ponownie później."
-  },
-  "_temp_": {
-    "invitation_send_stub": "Wysyłanie zaproszenia jest w budowie. Wróć tu wkrótce!"
   },
   "player": {
     "position_known": "{position}. w rankingu",

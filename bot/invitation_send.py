@@ -1,29 +1,59 @@
-"""Hand-off point into build order step 7 ("Invitation send / accept /
-reject with atomic locking" -- not built yet). start_invitation_send() is
-the single entry point step 6 (bot.partner_selection) calls once a partner
-has been resolved and every pre-invitation check in CLAUDE.md's
-"Pre-invitation checks" has passed.
+"""The confirmation screen (CLAUDE.md, "Invitation engine"; build order
+step 7). start_invitation_send() is the single entry point step 6
+(bot.partner_selection) calls once a partner has been resolved and every
+pre-invitation check has passed.
 
-For now it just sends a temporary stub reply. Step 7 replaces this
-function's body with the real invitation-creation flow (the confirmation
-screen, the "cannot be cancelled" warning, and the actual Invitation row)
-and deletes the _temp_ pl.json key below, same as step 6 did for step 5's
-stub.
+Nothing is written here. CLAUDE.md requires the "po akceptacji nie można
+zmienić partnera" warning to be shown *before* the player confirms — a
+confirmed match cannot be cancelled by either side — so this module only
+shows what is about to happen and hands the tap to
+bot.handlers.invitations, which runs the send transaction in
+bot.invitation_engine.
 
-TODO(step 7): by the time this is called, FSM state already carries
-tournament_guid, category and partner_pzt_id (see
-bot.partner_selection.handle_partner_candidate) -- everything the real
-invitation-creation transaction needs to look up the tournament, its
-Gra podwójna event, the inviter's account and the chosen partner.
+The transaction re-checks everything this screen assumed. The gap between
+seeing this screen and tapping Wyślij zaproszenie is unbounded: the player
+can leave the chat open for an hour, and the named partner can be matched
+by somebody else in the meantime.
 """
 
 from __future__ import annotations
 
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
+from bot.invitation_text import confirmation_text
+from bot.keyboards.invitations import confirm_send_keyboard
+from bot.states import InvitationSend
+from bot.tournament_search import label_for_tournament
+from db import crud
+from db.models import Account, Player, Tournament
 
 
-async def start_invitation_send(message: Message, state: FSMContext, lang: str) -> None:
-    await message.answer(t("_temp_.invitation_send_stub", lang))
+async def start_invitation_send(
+    message: Message,
+    state: FSMContext,
+    lang: str,
+    session: AsyncSession,
+    account: Account,
+    tournament: Tournament,
+    invitee: Player,
+) -> None:
+    invitee_account = await crud.get_account_by_pzt_id(session, invitee.pzt_id)
+    if invitee_account is None:
+        # The named player is on PZT's roster but doesn't use CourtDuo, so
+        # there is nowhere to deliver an invitation. CLAUDE.md scenario 2
+        # (share text via the player's own phone contacts) is build order
+        # step 9; until then, say so and let them type another name rather
+        # than show a confirmation screen that cannot lead anywhere. The
+        # player stays in PartnerSelection.waiting_name.
+        await message.answer(t("invitation.invitee_not_on_courtduo", lang, name=invitee.full_name))
+        return
+
+    await state.update_data(partner_pzt_id=invitee.pzt_id)
+    await message.answer(
+        confirmation_text(invitee.full_name, label_for_tournament(tournament), lang),
+        reply_markup=confirm_send_keyboard(lang),
+    )
+    await state.set_state(InvitationSend.waiting_confirmation)

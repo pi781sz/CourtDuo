@@ -20,13 +20,14 @@ from bot.tournament_search import (
     category_is_available,
     category_selected_text,
     category_short_label,
+    label_for_tournament,
     match_by_place,
     meets_min_place_length,
     ranga_prefix,
     selection_confirmation_text,
     tournament_label,
 )
-from db.models import AgeCategory
+from db.models import AgeCategory, Tournament
 
 UNIEJOW = TournamentOption(
     guid="t-uniejow", date_from=date(2026, 8, 29), venue_city="Uniejów", wojewodztwo="łódzkie", ranga=5
@@ -233,3 +234,38 @@ def test_selection_confirmation_falls_back_to_wojewodztwo_when_venue_city_is_nul
         lang="pl",
     )
     assert "mazowieckie" in text
+
+
+def test_label_for_tournament_matches_the_button_label_for_the_same_row():
+    # Step 7 names tournaments outside the results keyboard (the
+    # invitation, its confirmation, every status line). Those must read
+    # exactly like the button the player tapped to get there.
+    tournament = Tournament(
+        guid="t-uniejow",
+        name="Turniej testowy",
+        type_prefix="WTK",
+        age_category=AgeCategory.MLODZICY,
+        ranga=5,
+        date_from=date(2026, 8, 29),
+        venue_city="Uniejów",
+        wojewodztwo="łódzkie",
+    )
+
+    assert label_for_tournament(tournament) == tournament_label(UNIEJOW) == "WTK Uniejów - 29.08.2026"
+
+
+def test_label_for_tournament_survives_a_re_scrape_that_lost_the_date():
+    # An invitation points at this row for weeks. A missing date must cost
+    # the date, not the answer the label is attached to.
+    tournament = Tournament(
+        guid="t-radom",
+        name="Turniej testowy",
+        type_prefix=None,
+        age_category=AgeCategory.MLODZICY,
+        ranga=None,
+        date_from=None,
+        venue_city="Radom",
+        wojewodztwo="mazowieckie",
+    )
+
+    assert label_for_tournament(tournament) == "Radom"

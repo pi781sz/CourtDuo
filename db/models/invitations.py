@@ -2,11 +2,19 @@
 
 An `Invitation` is a structured, one-shot ask from `inviter_pzt_id` to
 `invitee_pzt_id` for one event of one tournament. It moves through
-PENDING -> ACCEPTED/REJECTED/CANCELLED/EXPIRED in place; it is never
-re-inserted for the same pair. `expires_at` is set by the caller per
-CLAUDE.md's 10:00-Europe/Warsaw-on-start-date rule; nothing here computes
-it, since that depends on the tournament's start date which only the
-caller has in hand at invitation-creation time.
+PENDING -> ACCEPTED/REJECTED/NOT_ATTENDING/CANCELLED/EXPIRED in place.
+`expires_at` is set by the caller per CLAUDE.md's
+10:00-Europe/Warsaw-on-start-date rule; nothing here computes it, since
+that depends on the tournament's start date which only the caller has in
+hand at invitation-creation time.
+
+A pair can appear in more than one row over time: an invitation answered
+REJECTED or NOT_ATTENDING may be followed by a fresh PENDING one for the
+same two players and the same tournament. That is deliberate and load
+bearing — CLAUDE.md forbids "nie jadę na ten turniej" from becoming a
+stored fact that blocks, hides or filters any future invitation, so
+nothing here or in db.crud may ever key uniqueness on (inviter, invitee,
+tournament).
 
 Two constraints CLAUDE.md asks to be enforced "in the database, not only
 in application code" can't be expressed as plain SQLAlchemy/Postgres

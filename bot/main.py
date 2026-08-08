@@ -3,7 +3,8 @@
 
 Registers one router per feature (CLAUDE.md build order step 4:
 registration; step 5: tournament selection by place; step 6: partner name
-entry). Later steps add routers here rather than growing these.
+entry; step 7: invitation send/accept/reject). Later steps add routers
+here rather than growing these.
 """
 
 from __future__ import annotations
@@ -18,7 +19,12 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
-from bot.handlers import partner_selection_router, start_router, tournament_search_router
+from bot.handlers import (
+    invitations_router,
+    partner_selection_router,
+    start_router,
+    tournament_search_router,
+)
 from bot.middlewares.db import DbSessionMiddleware
 
 load_dotenv()
@@ -42,6 +48,7 @@ async def main() -> None:
     dispatcher.include_router(start_router)
     dispatcher.include_router(tournament_search_router)
     dispatcher.include_router(partner_selection_router)
+    dispatcher.include_router(invitations_router)
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)

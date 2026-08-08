@@ -123,6 +123,37 @@ def tournament_label(option: TournamentOption) -> str:
     return f"{place} - {date_str}"
 
 
+def label_for_tournament(tournament: Tournament) -> str:
+    """tournament_label() for an ORM row, for the screens that name a
+    tournament outside the results keyboard — the invitation confirmation,
+    the invitation itself, and every status line in step 7.
+
+    Deliberately not `tournament_label(to_option(t))`: to_option logs a
+    warning for a NULL ranga, which belongs to rendering the results list
+    once, not to every invitation message that repeats the same label.
+
+    Unlike the results list, this runs against a row an invitation already
+    points at, weeks after it was chosen — long enough for a re-scrape to
+    null the date out from under it. The label is display only, so a
+    missing date costs the date, never the answer the label was attached
+    to.
+    """
+    if tournament.date_from is None:
+        logger.warning("Tournament %s has no date_from; labelling it without a date", tournament.guid)
+        prefix = ranga_prefix(tournament.ranga)
+        place = place_name(tournament.venue_city, tournament.wojewodztwo)
+        return f"{prefix} {place}" if prefix else place
+    return tournament_label(
+        TournamentOption(
+            guid=tournament.guid,
+            date_from=tournament.date_from,
+            venue_city=tournament.venue_city,
+            wojewodztwo=tournament.wojewodztwo,
+            ranga=tournament.ranga,
+        )
+    )
+
+
 def selection_confirmation_text(
     venue_city: str | None, wojewodztwo: str | None, category: AgeCategory, date_from: date, lang: str
 ) -> str:
