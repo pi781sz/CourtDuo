@@ -17,6 +17,7 @@ from bot.tournament_search import (
     TournamentOption,
     cap_results,
     category_is_available,
+    category_selected_text,
     category_short_label,
     match_by_place,
     meets_min_place_length,
@@ -154,6 +155,15 @@ def test_selection_confirmation_contains_town_category_and_date():
     assert "Grodzisk Mazowiecki" in text
     assert "U14" in text
     assert "2026.08.08" in text
+
+
+def test_category_selected_text_contains_short_form():
+    # CLAUDE.md step 5.3, problem 1: the confirmation shown right after
+    # tapping a category button must name the category in its short form.
+    assert category_selected_text(AgeCategory.MLODZICY, "pl") == "Wybrana kategoria wiekowa: U14"
+    assert "U12" in category_selected_text(AgeCategory.SKRZATY, "pl")
+    assert "U16" in category_selected_text(AgeCategory.KADECI, "pl")
+    assert "U18" in category_selected_text(AgeCategory.JUNIORZY, "pl")
 
 
 def test_selection_confirmation_falls_back_to_wojewodztwo_when_venue_city_is_null():

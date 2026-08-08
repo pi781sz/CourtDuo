@@ -1,9 +1,9 @@
 """Tournament selection: age category first, then place (CLAUDE.md,
-"Tournament selection"; build order step 5, revised by step 5.1). A
-registered player taps one of the four age-category buttons, then types a
-town or województwo and gets back tappable tournament buttons, one per
-matching tournament; tapping one hands off to step 6 via
-bot.partner_selection.
+"Tournament selection"; build order step 5, revised by step 5.1 and by
+step 5.3). A registered player taps one of the four age-category buttons,
+sees it confirmed, then types a town or województwo and gets back
+tappable tournament buttons, one per matching tournament; tapping one
+hands off to step 6 via bot.partner_selection.
 
 start_tournament_search() is the entry point step 4 calls after a
 successful registration and on /start for an already registered player.
@@ -32,6 +32,7 @@ from bot.keyboards.tournament_search import (
     TournamentSelectCallback,
     category_keyboard,
     no_matches_keyboard,
+    none_eligible_keyboard,
     results_keyboard,
 )
 from bot.lang import lang_for
@@ -40,6 +41,7 @@ from bot.states import TournamentSearch
 from bot.tournament_search import (
     TournamentOption,
     cap_results,
+    category_selected_text,
     match_by_place,
     meets_min_place_length,
     selection_confirmation_text,
@@ -126,7 +128,12 @@ async def handle_category(
 
     await state.update_data(category=category.name, place=None)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(t("tournament_search.ask_place", lang))
+    # Confirms the tapped category before asking for a place, since
+    # several screens later the player would otherwise have no way of
+    # knowing which category they are in (CLAUDE.md step 5.3).
+    category_line = category_selected_text(category, lang)
+    place_line = t("tournament_search.ask_place", lang)
+    await callback.message.answer(f"{category_line}\n{place_line}")
     await state.set_state(TournamentSearch.waiting_place)
     await callback.answer()
 
@@ -147,7 +154,13 @@ async def handle_place(message: Message, state: FSMContext, session: AsyncSessio
 
     eligible = await _eligible_options(session, gender, category)
     if not eligible:
-        await message.answer(t("tournament_search.none_eligible", lang, days=crud.ELIGIBILITY_WINDOW_DAYS))
+        # Zero tournaments in this category at all -- "Zmień miejscowość"
+        # would just repeat this dead end, so only offer a category change
+        # (CLAUDE.md step 5.3).
+        await message.answer(
+            t("tournament_search.none_eligible", lang, days=crud.ELIGIBILITY_WINDOW_DAYS),
+            reply_markup=none_eligible_keyboard(lang),
+        )
         return
 
     matches = match_by_place(eligible, place)
@@ -221,7 +234,18 @@ async def handle_select(
         category = AgeCategory[data["category"]]
         place = data.get("place") or ""
         eligible = await _eligible_options(session, gender, category)
+        if not eligible:
+            await callback.message.answer(
+                t("tournament_search.none_eligible", lang, days=crud.ELIGIBILITY_WINDOW_DAYS),
+                reply_markup=none_eligible_keyboard(lang),
+            )
+            return
         options = match_by_place(eligible, place) if place else eligible
+        if place and not options:
+            await callback.message.answer(
+                t("tournament_search.no_place_matches", lang), reply_markup=no_matches_keyboard(lang)
+            )
+            return
         await _send_results(callback.message, options, lang=lang)
         return
 

@@ -16,6 +16,7 @@
   },
   "tournament_search": {
     "ask_category": "Wybierz kategorię wiekową.",
+    "category_selected": "Wybrana kategoria wiekowa: {category}",
     "category_short": {
       "U12": "U12",
       "U14": "U14",

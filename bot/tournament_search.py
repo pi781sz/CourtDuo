@@ -56,6 +56,13 @@ def category_short_label(category: AgeCategory, lang: str) -> str:
     return t(f"tournament_search.category_short.U{category.value}", lang)
 
 
+def category_selected_text(category: AgeCategory, lang: str) -> str:
+    """The step 5.3 fix: confirms the tapped category before asking for a
+    place, so the player has a way of knowing which category they're in
+    several screens later."""
+    return t("tournament_search.category_selected", lang, category=category_short_label(category, lang))
+
+
 def category_is_available(counts: dict[AgeCategory, int], category: AgeCategory) -> bool:
     return counts.get(category, 0) > 0
 
