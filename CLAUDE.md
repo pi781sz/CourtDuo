@@ -57,11 +57,13 @@ Gender is derived from which ranking list the player appears in:
 ```
 Bot:   Aby zacząć, podaj swój login PZT.
 Adam:  SWD12345
-Bot:   Witaj Adam Smith. Podaj miejscowość turnieju.
+Bot:   Witaj Adam Smith. [buttons: U12  U14  U16  U18]
+Adam:  [taps U14]
+Bot:   Podaj miejscowość turnieju.
 Adam:  Uniejów
-Bot:   [buttons: matching tournaments with dates]
+Bot:   [buttons: "Uniejów — 2026.08.29", ...one per matching tournament]
 Adam:  [taps one]
-Bot:   Turniej zaczyna się 2026.08.29.
+Bot:   Wybrany turniej: Uniejów U14 — 2026.08.29.
        Wpisz imię i nazwisko osoby, którą chcesz zaprosić.
 Adam:  Peter Lorenz
 Bot:   [confirmation screen, warns the match cannot be cancelled]
@@ -101,22 +103,29 @@ Store a pending invite keyed on the typed name. When someone registers whose nam
 
 ### Scenario 3 — returning player
 
-Skips registration entirely. `/start` goes straight to *"Podaj miejscowość turnieju."*
+Skips registration entirely. `/start` goes straight to the age-category buttons.
 
 ---
 
 ## Tournament selection
 
+**Age category first, always.** Before asking for a place, the bot shows four buttons — U12, U14, U16, U18 — and the player taps one. This is asked every session; the bot never remembers the last choice, defaults to one, or derives it from the player's own ranking lists. A younger player may enter an older draw, so all four are always offered regardless of the player's age. A category with no eligible tournaments is shown rather than hidden, labelled e.g. "U12 — brak turniejów"; tapping it just re-shows the four buttons, never a place prompt. Availability must respect the player's gender — a girl must not see a category marked available on the strength of a boys-only draw.
+
 **Never ask the player to type a tournament name.** Real names are unusable — one live U18 tournament is literally `WTK - 👋U18 chł🎾dz😀Uniejów😀turniej grupowy🥇🥈🥉`.
 
-The player types a **place** (city or województwo). The bot matches against `venue_city` and `wojewodztwo`, diacritic-insensitively via `fold_diacritics`, and shows matching tournaments as buttons labelled *place — date*.
+Once a category is chosen, the player types a **place** (city or województwo). The bot matches against `venue_city` and `wojewodztwo`, diacritic-insensitively via `fold_diacritics`, and shows matching tournaments — already filtered to the chosen category — as buttons labelled *place — date*.
 
 Only show tournaments that:
-- start within the next 14 days
+- match the chosen age category
+- start within the next 28 days
 - have at least one event with `Gra podwójna`
 - match the player's gender (`Chłopcy` / `Dziewczęta`)
 
-If nothing matches the typed place, offer a button to show all eligible tournaments in the next 14 days. Never dead-end.
+If nothing matches the typed place, offer a button to show all eligible tournaments (in the chosen category) in the next 28 days. Never dead-end.
+
+**Confirm the exact tournament chosen.** On selecting a tournament, state the town, the age category and the date together in one message — e.g. "Wybrany turniej: Grodzisk Mazowiecki U14 — 2026.08.08" — never a date-only confirmation. This feeds an invitation that cannot be cancelled, so it must be unambiguous which tournament was picked.
+
+The results screen offers "Zmień miejscowość" (keeps the chosen category) and "Zmień kategorię wiekową" (clears it and returns to the four category buttons).
 
 ---
 

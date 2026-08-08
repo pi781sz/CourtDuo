@@ -1,8 +1,8 @@
-"""Inline keyboards for tournament-place search (CLAUDE.md, "Tournament
-selection"; build order step 5). Callback data classes live here
-alongside the keyboards they build, since bot/handlers/tournament_search.py
-needs both — the classes for `.filter()`/unpacking, the builders for
-rendering.
+"""Inline keyboards for tournament search (CLAUDE.md, "Tournament
+selection"; build order step 5, revised by step 5.1 to add the age
+category screen). Callback data classes live here alongside the
+keyboards they build, since bot/handlers/tournament_search.py needs both
+— the classes for `.filter()`/unpacking, the builders for rendering.
 """
 
 from __future__ import annotations
@@ -12,7 +12,18 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.i18n import t
-from bot.tournament_search import TournamentOption, tournament_label
+from bot.tournament_search import (
+    CATEGORY_ORDER,
+    TournamentOption,
+    category_is_available,
+    category_short_label,
+    tournament_label,
+)
+from db.models import AgeCategory
+
+
+class CategorySelectCallback(CallbackData, prefix="tcat"):
+    category: str
 
 
 class TournamentSelectCallback(CallbackData, prefix="tsel"):
@@ -31,6 +42,23 @@ class ChangePlaceCallback(CallbackData, prefix="tchg"):
     pass
 
 
+class ChangeCategoryCallback(CallbackData, prefix="tchgcat"):
+    pass
+
+
+def category_keyboard(counts: dict[AgeCategory, int], lang: str) -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for category in CATEGORY_ORDER:
+        short = category_short_label(category, lang)
+        if category_is_available(counts, category):
+            text = short
+        else:
+            text = t("tournament_search.category_unavailable", lang, category=short)
+        builder.button(text=text, callback_data=CategorySelectCallback(category=category.name))
+    builder.adjust(2)
+    return builder.as_markup()
+
+
 def results_keyboard(
     page: list[TournamentOption], has_more: bool, next_offset: int, lang: str
 ) -> InlineKeyboardMarkup:
@@ -43,6 +71,7 @@ def results_keyboard(
             callback_data=TournamentPageCallback(offset=next_offset),
         )
     builder.button(text=t("tournament_search.change_place", lang), callback_data=ChangePlaceCallback())
+    builder.button(text=t("tournament_search.change_category", lang), callback_data=ChangeCategoryCallback())
     builder.adjust(1)
     return builder.as_markup()
 

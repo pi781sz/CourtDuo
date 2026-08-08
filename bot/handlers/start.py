@@ -15,11 +15,11 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.attempt_limiter import FailedAttemptLimiter
+from bot.handlers.tournament_search import start_tournament_search
 from bot.i18n import t
 from bot.lang import DEFAULT_LANG, lang_for
 from bot.registration import RegistrationOutcome, register_by_pzt_id
 from bot.states import Registration
-from bot.tournament_search import start_tournament_search
 from db import crud
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,8 @@ async def handle_start(message: Message, state: FSMContext, session: AsyncSessio
     if account is not None:
         # CLAUDE.md scenario 3: returning player skips registration
         # entirely, straight to tournament search.
-        await start_tournament_search(message, state, lang_for(account))
+        gender = crud.gender_for_account_code(account.gender)
+        await start_tournament_search(message, state, lang_for(account), session, gender)
         return
 
     await message.answer(t("start.greeting", DEFAULT_LANG))
@@ -73,4 +74,5 @@ async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSessi
 
     account = result.account
     await message.answer(t("registration.welcome", lang, full_name=account.full_name))
-    await start_tournament_search(message, state, lang_for(account))
+    gender = crud.gender_for_account_code(account.gender)
+    await start_tournament_search(message, state, lang_for(account), session, gender)
