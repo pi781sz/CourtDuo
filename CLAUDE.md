@@ -61,9 +61,9 @@ Bot:   Witaj Adam Smith. [buttons: U12  U14  U16  U18]
 Adam:  [taps U14]
 Bot:   Podaj miejscowość turnieju.
 Adam:  Uniejów
-Bot:   [buttons: "Uniejów — 2026.08.29", ...one per matching tournament]
+Bot:   [buttons: "WTK Uniejów - 29.08.2026", ...one per matching tournament]
 Adam:  [taps one]
-Bot:   Wybrany turniej: Uniejów U14 — 2026.08.29.
+Bot:   Wybrany turniej: Uniejów U14 — 29.08.2026.
        Wpisz imię i nazwisko osoby, którą chcesz zaprosić.
 Adam:  Peter Lorenz
 Bot:   [confirmation screen, warns the match cannot be cancelled]
@@ -113,17 +113,43 @@ Skips registration entirely. `/start` goes straight to the age-category buttons.
 
 **Never ask the player to type a tournament name.** Real names are unusable — one live U18 tournament is literally `WTK - 👋U18 chł🎾dz😀Uniejów😀turniej grupowy🥇🥈🥉`.
 
-Once a category is chosen, the player types a **place** (city or województwo). The bot matches against `venue_city` and `wojewodztwo`, diacritic-insensitively via `fold_diacritics`, and shows matching tournaments — already filtered to the chosen category — as buttons labelled *place — date*.
+Once a category is chosen, the player types a **place** (city or województwo). The bot matches against `venue_city` and `wojewodztwo`, diacritic-insensitively via `fold_diacritics`, and shows matching tournaments — already filtered to the chosen category — as buttons.
 
 Only show tournaments that:
 - match the chosen age category
 - start within the next 28 days
 - have at least one event with `Gra podwójna`
 - match the player's gender (`Chłopcy` / `Dziewczęta`)
+- do not have `ranga` 6 or 7 (see "Internal tournaments are hidden" below)
 
 If nothing matches the typed place, offer a button to show all eligible tournaments (in the chosen category) in the next 28 days. Never dead-end.
 
-**Confirm the exact tournament chosen.** On selecting a tournament, state the town, the age category and the date together in one message — e.g. "Wybrany turniej: Grodzisk Mazowiecki U14 — 2026.08.08" — never a date-only confirmation. This feeds an invitation that cannot be cancelled, so it must be unambiguous which tournament was picked.
+**Internal tournaments are hidden.** Tournaments with `ranga` 6 or 7 are internal club events and must never appear — not in the results list, and not counted toward a category's availability (a category must never look available on the strength of a tournament the player will then not see). If `ranga` is `NULL`, the tournament is still shown, with no type prefix, and a warning naming the `guid` is logged — hiding it would risk losing a real tournament, which is worse than an unlabelled one.
+
+**Button label format.** `<prefix> <place> - <date>` — prefix, space, city (or województwo when `venue_city` is null), space, plain hyphen (`-`, not an em dash), space, date as `DD.MM.YYYY`. When there is no prefix (`ranga` is `NULL` or unmapped) the label simply starts with the place, e.g.:
+
+```
+WTK Uniejów - 22.08.2026
+OTK Kołobrzeg - 29.08.2026
+MW Kraków - 05.09.2026
+Radom - 20.08.2026            (ranga NULL — no prefix)
+```
+
+The prefix is derived from `ranga` via one lookup table (`bot.tournament_search.RANGA_PREFIX`), not scattered conditionals:
+
+| `ranga` | prefix |
+|---|---|
+| 1 | MP |
+| 2 | SS |
+| 3 | OTK |
+| 4 | MW |
+| 5 | WTK |
+| 6, 7 | *(not shown at all — see above)* |
+| `NULL` | *(no prefix)* |
+
+**All user-facing dates are `DD.MM.YYYY`**, e.g. `22.08.2026` — never `YYYY.MM.DD`. This applies to tournament button labels and to the selection confirmation message alike, so the player is never shown two different date formats in the same flow.
+
+**Confirm the exact tournament chosen.** On selecting a tournament, state the town, the age category and the date together in one message — e.g. "Wybrany turniej: Grodzisk Mazowiecki U14 — 08.08.2026" — never a date-only confirmation. This feeds an invitation that cannot be cancelled, so it must be unambiguous which tournament was picked.
 
 The results screen offers "Zmień miejscowość" (keeps the chosen category) and "Zmień kategorię wiekową" (clears it and returns to the four category buttons).
 

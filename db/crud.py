@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +48,15 @@ logger = logging.getLogger(__name__)
 # this — get_eligible_tournaments, get_eligible_tournament_counts_by_category
 # and their tests all import it rather than repeating the day count.
 ELIGIBILITY_WINDOW_DAYS = 28
+
+# CLAUDE.md, "Tournament selection": ranga 6/7 are internal club events and
+# must never appear -- not in the eligible list, and not in the per-category
+# counts that decide whether a category button looks available. A NULL
+# ranga is *not* hidden (bot.tournament_search.ranga_prefix handles the
+# NULL-ranga display case); `ranga.not_in(HIDDEN_RANGAS)` alone would drop
+# those rows too, since SQL NULL comparisons are neither true nor false, so
+# every query below OR's in an explicit `ranga.is_(None)` escape hatch.
+HIDDEN_RANGAS = frozenset({6, 7})
 
 _AGE_CATEGORY_BY_LABEL = {c.label: c for c in AgeCategory}
 _GENDER_BY_LABEL = {g.value: g for g in Gender}
@@ -317,7 +326,8 @@ async def get_eligible_tournaments(
     """Tournaments eligible for step 5's place search (CLAUDE.md,
     "Tournament selection"): matching `age_category` (step 5.1 asks for
     this first, before place), `date_from` within the next
-    ELIGIBILITY_WINDOW_DAYS days, the search window still open, and at
+    ELIGIBILITY_WINDOW_DAYS days, the search window still open, ranga not
+    one of HIDDEN_RANGAS (step 5.4: internal club events), and at
     least one `Gra podwójna` event matching `gender`.
 
     `today`/`now` are passed in rather than computed here: `today` should
@@ -347,6 +357,7 @@ async def get_eligible_tournaments(
             Tournament.date_from <= cutoff,
             Tournament.search_closes_at.is_not(None),
             Tournament.search_closes_at > now,
+            or_(Tournament.ranga.is_(None), Tournament.ranga.not_in(HIDDEN_RANGAS)),
             has_matching_doubles_event,
         )
         .order_by(Tournament.date_from.asc(), func.coalesce(Tournament.venue_city, Tournament.wojewodztwo).asc())
@@ -382,6 +393,7 @@ async def get_eligible_tournament_counts_by_category(
             Tournament.date_from <= cutoff,
             Tournament.search_closes_at.is_not(None),
             Tournament.search_closes_at > now,
+            or_(Tournament.ranga.is_(None), Tournament.ranga.not_in(HIDDEN_RANGAS)),
             has_matching_doubles_event,
         )
         .group_by(Tournament.age_category)
