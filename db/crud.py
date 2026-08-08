@@ -35,6 +35,8 @@ from .models import (
     AgeCategory,
     Event,
     Gender,
+    Invitation,
+    InvitationState,
     Player,
     Ranking,
     RankingList,
@@ -411,3 +413,60 @@ async def can_send_invitation(account: Account, tournament: Tournament) -> bool:
     exactly one function changes.
     """
     return True
+
+
+# CLAUDE.md, "Invitation engine": "A player may have up to 3 pending
+# outgoing invitations per tournament." The real invariant is enforced by
+# the `enforce_max_pending_invitations` Postgres trigger (see the
+# invitation-only-schema migration) with its own literal 3 -- SQL can't
+# reference a Python constant. This one backs the friendly pre-invitation
+# check in CLAUDE.md's "Pre-invitation checks" (build order step 6), which
+# exists to give a player an error *before* hitting that trigger, not to
+# replace it.
+MAX_PENDING_INVITATIONS_PER_TOURNAMENT = 3
+
+
+async def get_matched_invitation(session: AsyncSession, pzt_id: str, tournament_guid: str) -> Invitation | None:
+    """The ACCEPTED invitation that already locks `pzt_id` into a partner
+    at this tournament, if any -- `pzt_id` may appear as either side. Backs
+    two of CLAUDE.md's "Pre-invitation checks": "the inviter is already
+    matched" (checked before a name is even asked for) and, via the
+    resolved candidate's pzt_id, "the named player is already matched".
+    """
+    result = await session.execute(
+        select(Invitation).where(
+            Invitation.tournament_guid == tournament_guid,
+            Invitation.state == InvitationState.ACCEPTED,
+            or_(Invitation.inviter_pzt_id == pzt_id, Invitation.invitee_pzt_id == pzt_id),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_pending_invitation(
+    session: AsyncSession, inviter_pzt_id: str, invitee_pzt_id: str, tournament_guid: str
+) -> Invitation | None:
+    """CLAUDE.md, "Pre-invitation checks": "a pending invitation to that
+    same person for that tournament already exists"."""
+    result = await session.execute(
+        select(Invitation).where(
+            Invitation.tournament_guid == tournament_guid,
+            Invitation.inviter_pzt_id == inviter_pzt_id,
+            Invitation.invitee_pzt_id == invitee_pzt_id,
+            Invitation.state == InvitationState.PENDING,
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def count_pending_outgoing_invitations(session: AsyncSession, inviter_pzt_id: str, tournament_guid: str) -> int:
+    """CLAUDE.md, "Pre-invitation checks": "the inviter already has 3
+    pending outgoing invitations for this tournament"."""
+    result = await session.execute(
+        select(func.count(Invitation.id)).where(
+            Invitation.tournament_guid == tournament_guid,
+            Invitation.inviter_pzt_id == inviter_pzt_id,
+            Invitation.state == InvitationState.PENDING,
+        )
+    )
+    return result.scalar_one()
