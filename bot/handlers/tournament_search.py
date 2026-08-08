@@ -3,7 +3,8 @@
 step 5.3). A registered player taps one of the four age-category buttons,
 sees it confirmed, then types a town or województwo and gets back
 tappable tournament buttons, one per matching tournament; tapping one
-hands off to step 6 via bot.partner_selection.
+hands off to step 6 (partner name entry and pre-invitation checks) via
+bot.partner_selection.start_partner_selection.
 
 start_tournament_search() is the entry point step 4 calls after a
 successful registration and on /start for an already registered player.
@@ -255,4 +256,4 @@ async def handle_select(
     )
     await callback.message.answer(confirmation)
     await callback.answer()
-    await start_partner_selection(callback.message, state, lang)
+    await start_partner_selection(callback.message, state, lang, session, account, tournament)

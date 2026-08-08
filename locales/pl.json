@@ -40,8 +40,25 @@
     "not_attending_invitee": "Odpowiedziałeś, że nie jedziesz na ten turniej.",
     "not_attending_inviter": "⚪ {name} nie jedzie na ten turniej."
   },
+  "partner_selection": {
+    "ask_name": "Wpisz imię i nazwisko osoby, którą chcesz zaprosić.",
+    "name_too_short": "Wpisz imię i nazwisko — dwa wyrazy.",
+    "not_found": "Nie znaleziono takiego zawodnika. Sprawdź pisownię i spróbuj ponownie.",
+    "too_many_matches": "Znaleziono zbyt wielu zawodników o takim imieniu i nazwisku. Sprawdź pisownię i spróbuj ponownie.",
+    "disambiguation_prompt": "Znaleziono {count} graczy o tym imieniu i nazwisku. Wybierz właściwego:",
+    "candidate_label": "{name} — {list}, poz. {position}",
+    "candidate_label_no_position": "{name} — {list}",
+    "candidate_no_ranking": "{name} — brak rankingu w bazie",
+    "self_invite": "Nie możesz zaprosić samego siebie. Wpisz imię i nazwisko innej osoby.",
+    "gender_mismatch": "Ta osoba gra w innej kategorii płci. Wpisz imię i nazwisko innej osoby.",
+    "inviter_already_matched": "Masz już partnera na ten turniej: {name}.",
+    "invitee_already_matched": "{name} ma już partnera na ten turniej.\nWpisz imię i nazwisko innej osoby.",
+    "pending_invitation_exists": "Zaproszenie do {name} zostało już wysłane. Czekaj na odpowiedź.",
+    "max_pending_reached": "Masz już 3 oczekujące zaproszenia na ten turniej. Poczekaj na odpowiedź, zanim zaprosisz kogoś nowego.",
+    "cannot_send_invitation": "Nie możesz teraz wysłać zaproszenia. Spróbuj ponownie później."
+  },
   "_temp_": {
-    "partner_selection_stub": "Wybór partnera jest w budowie. Wróć tu wkrótce!"
+    "invitation_send_stub": "Wysyłanie zaproszenia jest w budowie. Wróć tu wkrótce!"
   },
   "player": {
     "position_known": "{position}. w rankingu",
