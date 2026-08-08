@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.invitation_send import start_invitation_send
+from bot.keyboards.navigation import terminal_keyboard
 from bot.keyboards.tournament_search import category_keyboard
 from bot.states import PartnerSelection, TournamentSearch
 from core.text import display_name, fold_diacritics
@@ -250,7 +251,10 @@ async def handle_partner_candidate(
     """
     failure = await run_pre_invitation_checks(session, account, tournament, candidate)
     if failure is not None:
-        await message.answer(t(_CHECK_FAILURE_MESSAGE_KEYS[failure], lang, name=display_name(candidate.full_name)))
+        await message.answer(
+            t(_CHECK_FAILURE_MESSAGE_KEYS[failure], lang, name=display_name(candidate.full_name)),
+            reply_markup=terminal_keyboard(lang),
+        )
         return
 
     # CLAUDE.md, "Monetisation": every invitation must route through this
@@ -259,7 +263,7 @@ async def handle_partner_candidate(
     # call is what keeps a player from reaching a confirmation screen they
     # are not entitled to act on.
     if not await can_send_invitation(account, tournament):
-        await message.answer(t("partner_selection.cannot_send_invitation", lang))
+        await message.answer(t("partner_selection.cannot_send_invitation", lang), reply_markup=terminal_keyboard(lang))
         return
 
     await start_invitation_send(message, state, lang, session, account, tournament, candidate)
@@ -283,7 +287,10 @@ async def start_partner_selection(
             matched.invitee_pzt_id if matched.inviter_pzt_id == account.pzt_id else matched.inviter_pzt_id
         )
         partner = await crud.get_player_by_pzt_id(session, partner_pzt_id)
-        await message.answer(t("partner_selection.inviter_already_matched", lang, name=display_name(partner.full_name)))
+        await message.answer(
+            t("partner_selection.inviter_already_matched", lang, name=display_name(partner.full_name)),
+            reply_markup=terminal_keyboard(lang),
+        )
 
         # No name to ask for -- CLAUDE.md, "Never dead-end": offer a way
         # back to the tournament list rather than leaving nothing to tap.
@@ -294,5 +301,5 @@ async def start_partner_selection(
         await state.set_state(TournamentSearch.waiting_category)
         return
 
-    await message.answer(t("partner_selection.ask_name", lang))
+    await message.answer(t("partner_selection.ask_name", lang), reply_markup=terminal_keyboard(lang))
     await state.set_state(PartnerSelection.waiting_name)

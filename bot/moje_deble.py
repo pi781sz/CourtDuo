@@ -48,13 +48,16 @@ class DebelEntry:
     """One invitation, from one player's point of view. `other_full_name`
     is always the *other* participant's PZT-order name (never the
     viewer's own) -- display_name() is applied at render time, once, the
-    same convention bot.invitation_text follows.
+    same convention bot.invitation_text follows. `other_pzt_id` is the
+    same participant's id -- the key _collapse_repeats groups by, since
+    two players can in principle share a display name but never a pzt_id.
     """
 
     invitation_id: int
     tournament_guid: str
     state: InvitationState
     direction: Direction
+    other_pzt_id: str
     other_full_name: str
     updated_at: datetime
 
@@ -85,15 +88,18 @@ def entry_from_invitation(invitation: Invitation, viewer_pzt_id: str) -> DebelEn
     """
     if invitation.inviter_pzt_id == viewer_pzt_id:
         direction = Direction.SENT
+        other_pzt_id = invitation.invitee_pzt_id
         other_full_name = invitation.invitee.full_name
     else:
         direction = Direction.RECEIVED
+        other_pzt_id = invitation.inviter_pzt_id
         other_full_name = invitation.inviter.full_name
     return DebelEntry(
         invitation_id=invitation.id,
         tournament_guid=invitation.tournament_guid,
         state=invitation.state,
         direction=direction,
+        other_pzt_id=other_pzt_id,
         other_full_name=other_full_name,
         updated_at=invitation.updated_at,
     )
@@ -122,6 +128,36 @@ def _entry_sort_key(entry: DebelEntry) -> tuple[int, float]:
     return (0 if entry.state is InvitationState.ACCEPTED else 1, -entry.updated_at.timestamp())
 
 
+def _collapse_repeats(entries: list[DebelEntry]) -> list[DebelEntry]:
+    """CLAUDE.md, "Moje deble" step 8.1: "Repeated invitations between the
+    same two players for the same tournament are listed once per attempt.
+    Collapse to one line per (tournament, other player), showing only the
+    most recent state." One tournament's worth of entries in, keyed by
+    `other_pzt_id` -- the two players can invite each other back and forth
+    (a rejection or "nie jadę" is free and instant), so direction alone
+    isn't enough to key on; only the latest row per pair is kept, and it
+    carries whichever direction it happened to be.
+    """
+    latest_by_pair: dict[str, DebelEntry] = {}
+    for entry in entries:
+        current = latest_by_pair.get(entry.other_pzt_id)
+        if current is None or entry.updated_at > current.updated_at:
+            latest_by_pair[entry.other_pzt_id] = entry
+    return list(latest_by_pair.values())
+
+
+def _matched_only(entries: list[DebelEntry]) -> list[DebelEntry]:
+    """CLAUDE.md, "Moje deble" step 8.1: "When a tournament has a match,
+    show ONLY the match line. Nothing else for that tournament." A locked
+    match makes every other row in the group dead history -- an older
+    rejection, or an invitation to a third player that never went
+    anywhere -- so once one ACCEPTED entry survives collapsing, it is the
+    only thing shown.
+    """
+    matched = [entry for entry in entries if entry.state is InvitationState.ACCEPTED]
+    return matched or entries
+
+
 @dataclass(frozen=True)
 class TournamentGroup:
     tournament_guid: str
@@ -134,7 +170,9 @@ def group_by_tournament(
 ) -> list[TournamentGroup]:
     """Every visible entry, grouped and ordered exactly as CLAUDE.md's
     "WHAT IT SHOWS" describes: tournaments by date_from ascending, entries
-    within a tournament matched-first-then-most-recent.
+    within a tournament matched-first-then-most-recent -- after collapsing
+    repeats between the same pair and dropping everything but a match, if
+    there is one.
     """
     entries = visible_entries(invitations, viewer_pzt_id, today)
     tournaments_by_guid: dict[str, Tournament] = {
@@ -147,6 +185,7 @@ def group_by_tournament(
 
     groups = []
     for guid, group_entries in grouped.items():
+        group_entries = _matched_only(_collapse_repeats(group_entries))
         group_entries.sort(key=_entry_sort_key)
         tournament = tournaments_by_guid[guid]
         groups.append(
@@ -174,11 +213,10 @@ _ENTRY_TEXT_KEYS: dict[tuple[Direction, InvitationState], str] = {
 
 
 def entry_line(entry: DebelEntry, lang: str) -> str:
-    """One status line. ACCEPTED is symmetric -- CLAUDE.md's example shows
-    the same "🟢 Partner: X" regardless of who invited whom -- everything
-    else is keyed by direction so a sent and a received line never read
-    the same way (CLAUDE.md: "'Maja Nowak — wysłane' and an invitation
-    FROM Maja are different things").
+    """One status line. ACCEPTED is symmetric -- the same "Gracie razem: X"
+    line regardless of who invited whom -- everything else is keyed by
+    direction, carried by the leading phrase ("Wysłane do:" vs "Zaproszenie
+    od:"), so a sent and a received line never read the same way.
     """
     name = display_name(entry.other_full_name)
     if entry.state is InvitationState.ACCEPTED:

@@ -197,7 +197,7 @@ async def handle_confirm_send(
     if account is None or tournament is None or invitee is None:
         # State lost (a bot restart clears MemoryStorage) or the tournament
         # was re-scraped away between the confirmation screen and this tap.
-        await callback.message.answer(t("tournament_search.tournament_gone", lang))
+        await callback.message.answer(t("tournament_search.tournament_gone", lang), reply_markup=terminal_keyboard(lang))
         if account is not None:
             gender = crud.gender_for_account_code(account.gender)
             await start_tournament_search(callback.message, state, lang, session, gender)
@@ -209,7 +209,10 @@ async def handle_confirm_send(
         name = invitee.full_name
         if result.inviter_partner_pzt_id is not None:
             _, name = await _participant(session, result.inviter_partner_pzt_id)
-        await callback.message.answer(t(_SEND_FAILURE_KEYS[result.failure], lang, name=display_name(name)))
+        await callback.message.answer(
+            t(_SEND_FAILURE_KEYS[result.failure], lang, name=display_name(name)),
+            reply_markup=terminal_keyboard(lang),
+        )
         if result.failure in _SEND_FAILURES_RESTARTING_SEARCH:
             gender = crud.gender_for_account_code(account.gender)
             await start_tournament_search(callback.message, state, lang, session, gender)
@@ -236,7 +239,10 @@ async def handle_confirm_send(
         invitation.state = InvitationState.CANCELLED
         await session.commit()
         logger.warning("Invitation %s cancelled: could not be delivered", invitation.id)
-        await callback.message.answer(t("invitation.delivery_failed", lang, name=display_name(invitee.full_name)))
+        await callback.message.answer(
+            t("invitation.delivery_failed", lang, name=display_name(invitee.full_name)),
+            reply_markup=terminal_keyboard(lang),
+        )
         await state.set_state(PartnerSelection.waiting_name)
         return
 
@@ -263,7 +269,7 @@ async def handle_cancel_send(callback: CallbackQuery, state: FSMContext, session
     # confirmation screen exists. Back to the name prompt with the
     # tournament still chosen.
     await callback.message.answer(t("invitation.send_cancelled", lang))
-    await callback.message.answer(t("partner_selection.ask_name", lang))
+    await callback.message.answer(t("partner_selection.ask_name", lang), reply_markup=terminal_keyboard(lang))
     await state.set_state(PartnerSelection.waiting_name)
 
 

@@ -188,15 +188,21 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
     await handle_moje_deble_command(message, db_session)
 
     texts = _texts(message)
+    # No pending received invitations anywhere in this scenario (tournament
+    # 1 is matched-only, tournament 2 is all sent), so the summary is the
+    # only message -- no per-invitation follow-ups.
     assert len(texts) == 1
     lines = texts[0].split("\n")
     assert lines[0] == "WTK Uniejów - " + f"{earlier:%d.%m.%Y}"
-    assert lines[1] == "🟢 Partner: Jagoda Testowa"
+    assert lines[1] == "🟢 Gracie razem: Jagoda Testowa"
     assert "" in lines  # blank line separates the two tournament blocks
     assert f"WTK Zielona Góra - {later:%d.%m.%Y}" in lines
-    assert "⚪ Maja Testowa — wysłane" in lines
-    assert "🔴 Bartosz Testowy — odmowa" in lines
-    assert "🟠 Wiktoria Testowa — nie jedzie" in lines
+    assert "🟠 Wysłane do: Maja Testowa" in lines
+    assert "🔴 Odmowa: Bartosz Testowy" in lines
+    assert "🔴 Nie jedzie: Wiktoria Testowa" in lines
+
+    markup = _markups(message)[0]
+    assert _button_texts(markup) == ["Znajdź partnera"]
 
 
 async def test_received_pending_reads_differently_and_is_actionable(db_session: AsyncSession):
@@ -208,18 +214,49 @@ async def test_received_pending_reads_differently_and_is_actionable(db_session: 
     message = _make_message(910010)
     await handle_moje_deble_command(message, db_session)
 
-    text = _texts(message)[0]
-    assert "Karol Testowy" in text
-    # Not the "wysłane" sent-pending wording -- this one was received.
-    assert "Karol Testowy — wysłane" not in text
+    texts = _texts(message)
+    # CLAUDE.md step 8.1, PROBLEM 3: the summary is one message; a still
+    # pending received invitation gets its own follow-up message with the
+    # three answer buttons, not a slot in the summary's own keyboard.
+    assert len(texts) == 2
+    summary_text = texts[0]
+    assert "Karol Testowy" in summary_text
+    # Not the "Wysłane do" sent-pending wording -- this one was received.
+    assert "Wysłane do: Karol Testowy" not in summary_text
+    assert _button_texts(_markups(message)[0]) == ["Znajdź partnera"]
 
-    markup = _markups(message)[0]
+    follow_up_text = texts[1]
+    assert follow_up_text == "🟠 Zaproszenie od: Karol Testowy"
+
+    markup = _markups(message)[1]
     button_texts = _button_texts(markup)
     assert len(button_texts) == 3
     assert any("Zatwierdź" in text for text in button_texts)
     assert any("Odrzuć" in text for text in button_texts)
     assert any("Nie jadę na ten turniej" in text for text in button_texts)
-    assert all("Karol Testowy" in text for text in button_texts)
+
+
+async def test_one_follow_up_message_per_pending_received_invitation(db_session: AsyncSession):
+    await _add_user(db_session, "MDB015", "Testowa Anna", telegram_id=910015)
+    await _add_user(db_session, "MDB016", "Testowy Karol")
+    await _add_user(db_session, "MDB017", "Testowa Ola")
+    await _add_tournament(db_session, "mdb-t15", _FAR_FUTURE, venue_city="Radom")
+    await _add_tournament(db_session, "mdb-t16", _FAR_FUTURE + timedelta(days=1), venue_city="Łódź")
+    await _add_invitation(db_session, "MDB016", "MDB015", "mdb-t15", InvitationState.PENDING)
+    await _add_invitation(db_session, "MDB017", "MDB015", "mdb-t16", InvitationState.PENDING)
+
+    message = _make_message(910015)
+    await handle_moje_deble_command(message, db_session)
+
+    texts = _texts(message)
+    # One summary message, plus one follow-up per pending received
+    # invitation -- CLAUDE.md step 8.1, PROBLEM 3.
+    assert len(texts) == 3
+    follow_ups = texts[1:]
+    assert any("Karol Testowy" in text for text in follow_ups)
+    assert any("Ola Testowa" in text for text in follow_ups)
+    for markup in _markups(message)[1:]:
+        assert len(_button_texts(markup)) == 3
 
 
 # --- WHAT IT HIDES: finished tournaments, day boundary --------------------------

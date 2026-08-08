@@ -25,6 +25,7 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
+from bot.keyboards.navigation import terminal_keyboard
 from bot.keyboards.tournament_search import (
     CategorySelectCallback,
     ChangeCategoryCallback,
@@ -134,7 +135,7 @@ async def handle_category(
     # knowing which category they are in (CLAUDE.md step 5.3).
     category_line = category_selected_text(category, lang)
     place_line = t("tournament_search.ask_place", lang)
-    await callback.message.answer(f"{category_line}\n{place_line}")
+    await callback.message.answer(f"{category_line}\n{place_line}", reply_markup=terminal_keyboard(lang))
     await state.set_state(TournamentSearch.waiting_place)
     await callback.answer()
 
@@ -147,7 +148,7 @@ async def handle_place(message: Message, state: FSMContext, session: AsyncSessio
     place = (message.text or "").strip()
 
     if not meets_min_place_length(place):
-        await message.answer(t("tournament_search.place_too_short", lang))
+        await message.answer(t("tournament_search.place_too_short", lang), reply_markup=terminal_keyboard(lang))
         return
 
     data = await state.get_data()
@@ -196,7 +197,7 @@ async def handle_change_place(callback: CallbackQuery, state: FSMContext, sessio
     # Keeps the chosen category (CLAUDE.md step 5.1, "Navigation").
     await state.update_data(place=None)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(t("tournament_search.ask_place", lang))
+    await callback.message.answer(t("tournament_search.ask_place", lang), reply_markup=terminal_keyboard(lang))
     await callback.answer()
 
 
@@ -230,7 +231,7 @@ async def handle_select(
         # 5.1, "the silent no-op"): say so, then re-show current results
         # instead of leaving a dead button on screen.
         await callback.answer()
-        await callback.message.answer(t("tournament_search.tournament_gone", lang))
+        await callback.message.answer(t("tournament_search.tournament_gone", lang), reply_markup=terminal_keyboard(lang))
         data = await state.get_data()
         category = AgeCategory[data["category"]]
         place = data.get("place") or ""
@@ -254,6 +255,6 @@ async def handle_select(
     confirmation = selection_confirmation_text(
         tournament.venue_city, tournament.wojewodztwo, tournament.age_category, tournament.date_from, lang
     )
-    await callback.message.answer(confirmation)
+    await callback.message.answer(confirmation, reply_markup=terminal_keyboard(lang))
     await callback.answer()
     await start_partner_selection(callback.message, state, lang, session, account, tournament)
