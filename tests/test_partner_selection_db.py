@@ -25,7 +25,7 @@ from bot.partner_selection import (
     run_pre_invitation_checks,
     start_partner_selection,
 )
-from bot.states import TournamentSearch
+from bot.states import InvitationSend, PartnerSelection, TournamentSearch
 from db import crud
 from db.models import Account, AgeCategory, Event, Gender, Invitation, InvitationState, Player, PlayType, Ranking, RankingList, Tournament
 
@@ -339,7 +339,38 @@ async def test_check_6_max_pending_invitations_reached_is_refused(db_session: As
     assert failure is CheckFailure.MAX_PENDING_REACHED
 
 
-async def test_all_checks_pass_hands_off_to_step_7_stub(db_session: AsyncSession):
+async def test_all_checks_pass_hands_off_to_the_confirmation_screen(db_session: AsyncSession):
+    tournament = _tournament()
+    db_session.add(tournament)
+    await db_session.flush()
+    await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "INV001", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2001, "INV001", "Testowa Anna", "W")
+    await _add_player(db_session, "INV002", "Testowa Ola", gender=Gender.GIRLS)
+    await _add_account(db_session, 2002, "INV002", "Testowa Ola", "W")
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "INV001")
+    candidate = await crud.get_player_by_pzt_id(db_session, "INV002")
+    message = _make_message()
+    state = _make_state(2001)
+
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
+
+    data = await state.get_data()
+    assert data["partner_pzt_id"] == "INV002"
+    assert await state.get_state() == InvitationSend.waiting_confirmation.state
+    # Step 7's confirmation screen, warning before anything is written.
+    text = message.answer.call_args.args[0]
+    assert text.startswith("Zaproszenie do: Testowa Ola")
+    assert "Uwaga: po akceptacji nie można zmienić partnera." in text
+    assert message.answer.call_args.kwargs["reply_markup"] is not None
+
+
+async def test_a_named_player_who_does_not_use_courtduo_gets_no_confirmation_screen(db_session: AsyncSession):
+    # The roster is PZT's, not CourtDuo's, so a perfectly real player may
+    # have no account to deliver an invitation to. CLAUDE.md scenario 2 is
+    # build order step 9; until then this must not dead-end.
     tournament = _tournament()
     db_session.add(tournament)
     await db_session.flush()
@@ -353,10 +384,11 @@ async def test_all_checks_pass_hands_off_to_step_7_stub(db_session: AsyncSession
     candidate = await crud.get_player_by_pzt_id(db_session, "INV002")
     message = _make_message()
     state = _make_state(2001)
+    await state.set_state(PartnerSelection.waiting_name)
 
     await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
 
-    data = await state.get_data()
-    assert data["partner_pzt_id"] == "INV002"
     texts = [call.args[0] for call in message.answer.call_args_list]
-    assert any("budowie" in text for text in texts)
+    assert texts == ["Testowa Ola nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby."]
+    # Still at the name prompt, free to try somebody else.
+    assert await state.get_state() == PartnerSelection.waiting_name.state

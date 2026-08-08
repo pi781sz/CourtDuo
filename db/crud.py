@@ -12,13 +12,18 @@ straight into a mapped column with no translation step.
 
 No bot logic lives here beyond straightforward persistence:
 can_send_invitation (the entitlement check CLAUDE.md's "Monetisation"
-section asks to be routed through from day one) and the account CRUD that
-registration needs. The invitation engine itself (invitation send/accept/
-reject transactions) is bot code, out of scope for this task.
+section asks to be routed through from day one), the account CRUD that
+registration needs, and the invitation queries below. The invitation
+engine's decisions — which transaction runs, what it re-verifies, what it
+cancels — live in bot.invitation_engine; this module only supplies the
+statements it runs, including the two locking statements
+(lock_invitation_slot, lock_tournament_invitations_for_players) whose
+exact shape the engine's correctness depends on.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import date, datetime, timedelta
 
@@ -461,7 +466,17 @@ async def get_pending_invitation(
 
 async def count_pending_outgoing_invitations(session: AsyncSession, inviter_pzt_id: str, tournament_guid: str) -> int:
     """CLAUDE.md, "Pre-invitation checks": "the inviter already has 3
-    pending outgoing invitations for this tournament"."""
+    pending outgoing invitations for this tournament".
+
+    Counts every PENDING row, expired or not, exactly as the
+    `enforce_max_pending_invitations` trigger does — a divergence between
+    the two would mean the friendly check passes and the trigger then
+    raises. Expiry can't distort this count in practice: an invitation
+    expires at 10:00 on the tournament's start date, by which time
+    `search_closes_at` has passed and the tournament can no longer be
+    selected at all (see get_eligible_tournaments), so there is no way to
+    reach the send flow for a tournament whose PENDING rows have expired.
+    """
     result = await session.execute(
         select(func.count(Invitation.id)).where(
             Invitation.tournament_guid == tournament_guid,
@@ -470,3 +485,153 @@ async def count_pending_outgoing_invitations(session: AsyncSession, inviter_pzt_
         )
     )
     return result.scalar_one()
+
+
+async def get_doubles_event(session: AsyncSession, tournament_guid: str, gender: Gender) -> Event | None:
+    """The `Gra podwójna` event an invitation for this tournament hangs
+    off (`invitations.event_id`), for the inviting player's gender.
+
+    A tournament can carry more than one matching doubles event when PZT
+    splits a draw across category labels; `order_by(Event.id)` makes the
+    pick deterministic rather than whatever order the planner returns.
+    Returns None when the tournament has no doubles draw for that gender
+    at all, which the caller must treat as "cannot invite here" — the
+    eligibility filter should already have excluded such a tournament.
+    """
+    result = await session.execute(
+        select(Event)
+        .where(
+            Event.tournament_guid == tournament_guid,
+            Event.is_doubles.is_(True),
+            Event.gender == gender,
+        )
+        .order_by(Event.id.asc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_invitation_by_id(session: AsyncSession, invitation_id: int) -> Invitation | None:
+    result = await session.execute(select(Invitation).where(Invitation.id == invitation_id))
+    return result.scalar_one_or_none()
+
+
+def _advisory_lock_key(inviter_pzt_id: str, tournament_guid: str) -> int:
+    """A stable signed-64-bit key for one (inviter, tournament) send slot.
+
+    Hashed in Python rather than with Postgres' `hashtext()` so the key
+    can't shift with a server version or collation change — a lock key
+    that changes underneath a running bot would silently stop serializing
+    anything. Collisions only cost two unrelated inviters a moment of
+    serialization, never correctness.
+    """
+    digest = hashlib.blake2b(f"{inviter_pzt_id}\x00{tournament_guid}".encode(), digest_size=8).digest()
+    return int.from_bytes(digest, "big", signed=True)
+
+
+async def lock_invitation_slot(session: AsyncSession, inviter_pzt_id: str, tournament_guid: str) -> None:
+    """Serializes every concurrent invitation *send* by one player for one
+    tournament, so CLAUDE.md's "up to 3 pending outgoing invitations per
+    tournament" can be counted and acted on atomically.
+
+    Row locks can't do this job: the rows that would break the limit are
+    the ones being inserted, and `SELECT ... FOR UPDATE` cannot lock a row
+    that does not exist yet (two sends starting from zero pending rows
+    would lock nothing, count zero, and both insert). A transaction-scoped
+    advisory lock keyed on the slot itself has no such gap. It is released
+    automatically at COMMIT or ROLLBACK.
+
+    Deadlock-free by construction: a send takes this lock and then only
+    reads, while an accept takes row locks and never asks for this one, so
+    no cycle between the two paths is possible.
+    """
+    await session.execute(select(func.pg_advisory_xact_lock(_advisory_lock_key(inviter_pzt_id, tournament_guid))))
+
+
+async def lock_tournament_invitations_for_players(
+    session: AsyncSession, tournament_guid: str, pzt_ids: tuple[str, str]
+) -> list[Invitation]:
+    """`SELECT ... FOR UPDATE` over every invitation at one tournament that
+    either player appears in, on either side — the lock CLAUDE.md's
+    "Atomic locking is mandatory" calls for, and the whole reason two
+    people cannot be double-booked.
+
+    Three details this depends on, none of them optional:
+
+    - **No state filter.** Under READ COMMITTED, a statement that blocks
+      on a row lock re-evaluates its WHERE clause against the row version
+      the winning transaction committed. A `state = 'PENDING'` predicate
+      would therefore *drop* the row that just became ACCEPTED — the loser
+      would see no conflict and accept on top of it. States are compared
+      in Python, after the lock, precisely so the row can never vanish
+      from under the check.
+    - **`ORDER BY id`.** Postgres locks rows in the order the plan emits
+      them, so a fixed order means two transactions covering overlapping
+      sets take those rows in the same sequence and one simply waits,
+      instead of the two deadlocking on a lock-order inversion.
+    - **`populate_existing`.** Rows already in the session's identity map
+      are not refreshed by a later query by default, so without this the
+      caller could re-check `state` against the stale value it read
+      before taking the lock — the exact check the lock exists to make
+      trustworthy.
+
+    Two accept transactions conflict exactly when they need to: each locks
+    every row involving either of its two players, so any pair of accepts
+    sharing a player shares at least one row and serializes on it.
+    """
+    result = await session.execute(
+        select(Invitation)
+        .where(
+            Invitation.tournament_guid == tournament_guid,
+            or_(Invitation.inviter_pzt_id.in_(pzt_ids), Invitation.invitee_pzt_id.in_(pzt_ids)),
+        )
+        .order_by(Invitation.id.asc())
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return list(result.scalars().all())
+
+
+async def lock_invitation(session: AsyncSession, invitation_id: int) -> Invitation | None:
+    """One invitation row, locked — enough for the answers that change
+    only that row (Odrzuć, "Nie jadę na ten turniej"), where the race to
+    guard against is an accept elsewhere cancelling this same row.
+
+    `populate_existing` for the same reason as in
+    lock_tournament_invitations_for_players: the caller must read the
+    committed state, not whatever the identity map already held.
+    """
+    result = await session.execute(
+        select(Invitation)
+        .where(Invitation.id == invitation_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none()
+
+
+async def create_invitation(
+    session: AsyncSession,
+    inviter_pzt_id: str,
+    invitee_pzt_id: str,
+    tournament_guid: str,
+    event_id: int,
+    expires_at: datetime,
+) -> Invitation:
+    """Inserts one PENDING invitation. `expires_at` is the tournament's
+    already-stored `search_closes_at` (10:00 Europe/Warsaw on the start
+    date, converted to UTC at scrape time) — never recomputed here, and
+    never an offset arithmetic of its own (CLAUDE.md, "Invitation
+    engine").
+    """
+    invitation = Invitation(
+        inviter_pzt_id=inviter_pzt_id,
+        invitee_pzt_id=invitee_pzt_id,
+        tournament_guid=tournament_guid,
+        event_id=event_id,
+        state=InvitationState.PENDING,
+        expires_at=expires_at,
+    )
+    session.add(invitation)
+    await session.flush()
+    return invitation

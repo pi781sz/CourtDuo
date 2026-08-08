@@ -253,13 +253,15 @@ async def handle_partner_candidate(
         return
 
     # CLAUDE.md, "Monetisation": every invitation must route through this
-    # seam even though it always returns True until paid tiers launch.
+    # seam even though it always returns True until paid tiers launch. The
+    # send transaction asks again at the moment it writes the row; this
+    # call is what keeps a player from reaching a confirmation screen they
+    # are not entitled to act on.
     if not await can_send_invitation(account, tournament):
         await message.answer(t("partner_selection.cannot_send_invitation", lang))
         return
 
-    await state.update_data(partner_pzt_id=candidate.pzt_id)
-    await start_invitation_send(message, state, lang)
+    await start_invitation_send(message, state, lang, session, account, tournament, candidate)
 
 
 # --- Entry point -------------------------------------------------------------

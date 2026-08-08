@@ -39,11 +39,21 @@ class Plan(enum.Enum):
 
 
 class InvitationState(enum.Enum):
-    """CLAUDE.md, "Invitation engine": PENDING -> ACCEPTED | REJECTED | CANCELLED | EXPIRED."""
+    """CLAUDE.md, "Invitation engine": PENDING -> ACCEPTED | REJECTED |
+    NOT_ATTENDING | CANCELLED | EXPIRED.
+
+    NOT_ATTENDING is a terminal state on one invitation row and nothing
+    more (CLAUDE.md, "Spec change: a third invitation response"). It is
+    deliberately *not* a stored fact about a player and a tournament:
+    nothing filters, hides or blocks on it, and there is no
+    "not attending" table or flag anywhere in the schema. Players change
+    their minds, enter late and withdraw.
+    """
 
     PENDING = "PENDING"
     ACCEPTED = "ACCEPTED"
     REJECTED = "REJECTED"
+    NOT_ATTENDING = "NOT_ATTENDING"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
 
