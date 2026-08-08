@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.tournament_search import start_tournament_search
 from bot.i18n import t
+from bot.keyboards.navigation import terminal_keyboard
 from bot.keyboards.partner_selection import PartnerSelectCallback, disambiguation_keyboard
 from bot.lang import lang_for
 from bot.partner_selection import (
@@ -46,7 +47,7 @@ async def handle_partner_name(message: Message, state: FSMContext, session: Asyn
         # CLAUDE.md, "Name matching": a hard rule, not a nicety -- a
         # single-token search over the whole roster is exactly the
         # browsable directory CLAUDE.md forbids.
-        await message.answer(t("partner_selection.name_too_short", lang))
+        await message.answer(t("partner_selection.name_too_short", lang), reply_markup=terminal_keyboard(lang))
         return
 
     data = await state.get_data()
@@ -56,7 +57,7 @@ async def handle_partner_name(message: Message, state: FSMContext, session: Asyn
         # "Never dead-end": there's nothing left to invite a partner to, so
         # send the player back to the top of tournament search.
         gender = crud.gender_for_account_code(account.gender)
-        await message.answer(t("tournament_search.tournament_gone", lang))
+        await message.answer(t("tournament_search.tournament_gone", lang), reply_markup=terminal_keyboard(lang))
         await start_tournament_search(message, state, lang, session, gender)
         return
 
@@ -66,10 +67,10 @@ async def handle_partner_name(message: Message, state: FSMContext, session: Asyn
     if outcome is MatchOutcome.NOT_FOUND:
         # CLAUDE.md, "Not found": no suggestions, no "did you mean" --
         # that's discovery by another name.
-        await message.answer(t("partner_selection.not_found", lang))
+        await message.answer(t("partner_selection.not_found", lang), reply_markup=terminal_keyboard(lang))
         return
     if outcome is MatchOutcome.TOO_MANY:
-        await message.answer(t("partner_selection.too_many_matches", lang))
+        await message.answer(t("partner_selection.too_many_matches", lang), reply_markup=terminal_keyboard(lang))
         return
     if outcome is MatchOutcome.SINGLE:
         await handle_partner_candidate(message, state, session, lang, account, tournament, matches[0])
@@ -97,14 +98,14 @@ async def handle_partner_select(
 
     if tournament is None:
         gender = crud.gender_for_account_code(account.gender)
-        await callback.message.answer(t("tournament_search.tournament_gone", lang))
+        await callback.message.answer(t("tournament_search.tournament_gone", lang), reply_markup=terminal_keyboard(lang))
         await start_tournament_search(callback.message, state, lang, session, gender)
         return
     if candidate is None:
         # Extremely unlikely -- the player row disappeared between the
         # disambiguation list being built and this tap. Never dead-end:
         # let the player just type the name again.
-        await callback.message.answer(t("partner_selection.not_found", lang))
+        await callback.message.answer(t("partner_selection.not_found", lang), reply_markup=terminal_keyboard(lang))
         return
 
     await handle_partner_candidate(callback.message, state, session, lang, account, tournament, candidate)

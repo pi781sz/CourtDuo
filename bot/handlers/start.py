@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.attempt_limiter import FailedAttemptLimiter
 from bot.handlers.tournament_search import start_tournament_search
 from bot.i18n import t
+from bot.keyboards.navigation import terminal_keyboard
 from bot.lang import DEFAULT_LANG, lang_for
 from bot.registration import RegistrationOutcome, register_by_pzt_id
 from bot.states import Registration
@@ -52,7 +53,7 @@ async def handle_start(message: Message, state: FSMContext, session: AsyncSessio
         return
 
     await message.answer(t("start.greeting", DEFAULT_LANG))
-    await message.answer(t("registration.ask_pzt_id", DEFAULT_LANG))
+    await message.answer(t("registration.ask_pzt_id", DEFAULT_LANG), reply_markup=terminal_keyboard(DEFAULT_LANG))
     await state.set_state(Registration.waiting_pzt_id)
 
 
@@ -62,18 +63,21 @@ async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSessi
     lang = DEFAULT_LANG
 
     if _attempt_limiter.is_blocked(telegram_id):
-        await message.answer(t("registration.too_many_attempts", lang))
+        await message.answer(t("registration.too_many_attempts", lang), reply_markup=terminal_keyboard(lang))
         return
 
     result = await register_by_pzt_id(session, telegram_id, message.text or "")
 
     if result.outcome is not RegistrationOutcome.SUCCESS:
         _attempt_limiter.record_failure(telegram_id)
-        await message.answer(t(_FAILURE_MESSAGE_KEYS[result.outcome], lang))
+        await message.answer(t(_FAILURE_MESSAGE_KEYS[result.outcome], lang), reply_markup=terminal_keyboard(lang))
         # Stays in Registration.waiting_pzt_id so the player can retry.
         return
 
     account = result.account
-    await message.answer(t("registration.welcome", lang, first_name=first_name(account.full_name)))
+    await message.answer(
+        t("registration.welcome", lang, first_name=first_name(account.full_name)),
+        reply_markup=terminal_keyboard(lang_for(account)),
+    )
     gender = crud.gender_for_account_code(account.gender)
     await start_tournament_search(message, state, lang_for(account), session, gender)

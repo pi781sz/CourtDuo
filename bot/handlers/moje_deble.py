@@ -1,8 +1,9 @@
 """/moje_deble and the "Moje deble" button (CLAUDE.md, "Moje deble" status
-view; build order step 8): one place a player sees every invitation they
-have sent or received. Reachable two ways -- the command and the button
-every terminal message now carries (bot.keyboards.navigation.
-terminal_keyboard) -- both routed through the same rendering here.
+view; build order step 8, reworked by step 8.1): one place a player sees
+every invitation they have sent or received. Reachable two ways -- the
+command and the button every terminal message now carries
+(bot.keyboards.navigation.terminal_keyboard) -- both routed through the
+same rendering here.
 
 Carries no state filter, like bot.handlers.navigation.handle_find_partner:
 the button can follow a pushed notification or a terminal message from any
@@ -11,10 +12,13 @@ Unlike "Znajdź partnera", looking at this view doesn't change anything
 about where the player was, so the state is left untouched rather than
 reset.
 
-Answering a pending received invitation from this view runs through step
-7's own handlers unchanged (bot.handlers.invitations.handle_accept/
-handle_reject/handle_not_attending) -- bot.keyboards.moje_deble only
-builds the same callback payloads with a name-labelled button.
+Step 8.1: a pending received invitation can't hang its buttons off the one
+summary message any more (there can be several, and they'd need to be
+distinguishable) -- so the summary is one message, and every pending
+received invitation gets its own follow-up message carrying step 7's own
+three-button keyboard (bot.keyboards.invitations.invitation_answer_keyboard)
+unchanged, wired to the exact same handlers
+(bot.handlers.invitations.handle_accept/handle_reject/handle_not_attending).
 """
 
 from __future__ import annotations
@@ -30,10 +34,10 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
-from bot.keyboards.moje_deble import pending_received_keyboard
-from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard
+from bot.keyboards.invitations import invitation_answer_keyboard
+from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard, terminal_keyboard
 from bot.lang import lang_for
-from bot.moje_deble import group_by_tournament, pending_received_entries, render_groups
+from bot.moje_deble import entry_line, group_by_tournament, pending_received_entries, render_groups
 from db import crud
 from db.models import Account
 
@@ -62,9 +66,20 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
         await message.answer(t("moje_deble.empty", lang), reply_markup=find_partner_keyboard(lang))
         return
 
-    text = render_groups(groups, lang)
-    keyboard = pending_received_keyboard(pending_received_entries(groups), lang)
-    await message.answer(text, reply_markup=keyboard)
+    # CLAUDE.md step 8.1: "The summary list message itself gets [Znajdź
+    # partnera]." Not [Moje deble] too, for the same reason as the empty
+    # state -- it would only point back at the screen the player is
+    # already looking at.
+    await message.answer(render_groups(groups, lang), reply_markup=find_partner_keyboard(lang))
+
+    # One follow-up message per still-open received invitation, each with
+    # its own answer keyboard, since a single summary message can't carry
+    # more than one invitation's worth of Zatwierdź/Odrzuć/"Nie jadę"
+    # buttons unambiguously.
+    for entry in pending_received_entries(groups):
+        await message.answer(
+            entry_line(entry, lang), reply_markup=invitation_answer_keyboard(entry.invitation_id, lang)
+        )
 
 
 @router.message(Command("moje_deble"))
@@ -74,7 +89,7 @@ async def handle_moje_deble_command(message: Message, session: AsyncSession) -> 
     if account is None:
         # Unlike the button, the command is typeable by anyone at any
         # time, including before /start has ever run.
-        await message.answer(t("moje_deble.not_registered", lang))
+        await message.answer(t("moje_deble.not_registered", lang), reply_markup=terminal_keyboard(lang))
         return
     await _render_and_send(message, session, account, lang)
 

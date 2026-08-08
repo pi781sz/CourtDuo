@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.i18n import t
 from bot.invitation_text import confirmation_text
 from bot.keyboards.invitations import confirm_send_keyboard
+from bot.keyboards.navigation import terminal_keyboard
 from bot.states import InvitationSend
 from bot.tournament_search import label_for_tournament
 from core.text import display_name
@@ -49,7 +50,10 @@ async def start_invitation_send(
         # step 9; until then, say so and let them type another name rather
         # than show a confirmation screen that cannot lead anywhere. The
         # player stays in PartnerSelection.waiting_name.
-        await message.answer(t("invitation.invitee_not_on_courtduo", lang, name=display_name(invitee.full_name)))
+        await message.answer(
+            t("invitation.invitee_not_on_courtduo", lang, name=display_name(invitee.full_name)),
+            reply_markup=terminal_keyboard(lang),
+        )
         return
 
     await state.update_data(partner_pzt_id=invitee.pzt_id)
