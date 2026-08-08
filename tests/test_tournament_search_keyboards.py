@@ -10,7 +10,13 @@ from __future__ import annotations
 from datetime import date
 
 from bot.handlers.tournament_search import _results_text
-from bot.keyboards.tournament_search import ChangeCategoryCallback, ChangePlaceCallback, results_keyboard
+from bot.keyboards.tournament_search import (
+    ChangeCategoryCallback,
+    ChangePlaceCallback,
+    no_matches_keyboard,
+    none_eligible_keyboard,
+    results_keyboard,
+)
 from bot.tournament_search import MAX_RESULTS, TournamentOption, cap_results
 
 _NAV_BUTTON_COUNT = 2  # "Zmień miejscowość" + "Zmień kategorię wiekową"
@@ -57,6 +63,34 @@ def test_results_text_adds_narrowing_note_only_when_capped():
 
     assert "zawęź" in capped_text.lower()
     assert "zawęź" not in uncapped_text.lower()
+
+
+def _callback_prefixes(markup) -> list[str]:
+    return [button.callback_data.split(":")[0] for row in markup.inline_keyboard for button in row if button.callback_data]
+
+
+def test_every_post_category_keyboard_offers_change_category():
+    # CLAUDE.md step 5.3, problem 2: once a category is chosen, every
+    # keyboard the player can reach must offer a way back to the category
+    # screen -- never just a subset of them.
+    change_category_prefix = ChangeCategoryCallback.__prefix__
+
+    keyboards = {
+        "results_keyboard": results_keyboard(_options(3), "pl"),
+        "results_keyboard_empty": results_keyboard([], "pl"),
+        "no_matches_keyboard": no_matches_keyboard("pl"),
+        "none_eligible_keyboard": none_eligible_keyboard("pl"),
+    }
+    for name, markup in keyboards.items():
+        assert change_category_prefix in _callback_prefixes(markup), f"{name} is missing change-category"
+
+
+def test_no_matches_keyboard_still_offers_show_all_and_change_place():
+    markup = no_matches_keyboard("pl")
+    texts = _all_button_texts(markup)
+    assert any("wszystkie" in text.lower() for text in texts)
+    assert any("miejscowość" in text.lower() for text in texts)
+    assert any("kategori" in text.lower() for text in texts)
 
 
 def test_no_pagination_callback_classes_remain():

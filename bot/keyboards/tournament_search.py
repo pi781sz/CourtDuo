@@ -1,8 +1,10 @@
 """Inline keyboards for tournament search (CLAUDE.md, "Tournament
 selection"; build order step 5, revised by step 5.1 to add the age
-category screen). Callback data classes live here alongside the
-keyboards they build, since bot/handlers/tournament_search.py needs both
-— the classes for `.filter()`/unpacking, the builders for rendering.
+category screen, and by step 5.3 so "Zmień kategorię wiekową" appears on
+every keyboard shown after a category has been chosen). Callback data
+classes live here alongside the keyboards they build, since
+bot/handlers/tournament_search.py needs both — the classes for
+`.filter()`/unpacking, the builders for rendering.
 """
 
 from __future__ import annotations
@@ -69,5 +71,16 @@ def no_matches_keyboard(lang: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=t("tournament_search.show_all", lang), callback_data=ShowAllTournamentsCallback())
     builder.button(text=t("tournament_search.change_place", lang), callback_data=ChangePlaceCallback())
+    builder.button(text=t("tournament_search.change_category", lang), callback_data=ChangeCategoryCallback())
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def none_eligible_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """Shown with "none_eligible" (CLAUDE.md step 5.3): zero tournaments
+    match this category at all, so "Zmień miejscowość" would only lead to
+    the same dead end again — only a category change can help."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=t("tournament_search.change_category", lang), callback_data=ChangeCategoryCallback())
     builder.adjust(1)
     return builder.as_markup()
