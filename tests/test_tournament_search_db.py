@@ -27,13 +27,14 @@ def _make_tournament(
     venue_city: str | None = "Testowo",
     wojewodztwo: str | None = "testowe",
     age_category: AgeCategory = AgeCategory.JUNIORZY,
+    ranga: int | None = None,
 ) -> Tournament:
     return Tournament(
         guid=guid,
         name=f"Turniej testowy {guid}",
         type_prefix="OTK",
         age_category=age_category,
-        ranga=None,
+        ranga=ranga,
         date_from=date_from,
         date_to=date_from,
         wojewodztwo=wojewodztwo,
@@ -247,3 +248,67 @@ async def test_category_counts_group_multiple_tournaments(db_session: AsyncSessi
     counts = await crud.get_eligible_tournament_counts_by_category(db_session, Gender.BOYS, _TODAY, _NOW)
 
     assert counts.get(AgeCategory.KADECI) == 2
+
+
+async def test_ranga_six_and_seven_are_excluded_from_eligible_list(db_session: AsyncSession):
+    # CLAUDE.md step 5.4: ranga 6/7 are internal club events -- must not
+    # appear at all, alongside an ordinary ranga 3 tournament that must
+    # still show up.
+    internal_six = _make_tournament("internal-six", date(2026, 8, 10), _NOW + timedelta(hours=1), ranga=6)
+    internal_seven = _make_tournament("internal-seven", date(2026, 8, 11), _NOW + timedelta(hours=1), ranga=7)
+    public = _make_tournament("public", date(2026, 8, 12), _NOW + timedelta(hours=1), ranga=3)
+    db_session.add_all([internal_six, internal_seven, public])
+    await db_session.flush()
+    db_session.add(_make_event("internal-six", Gender.BOYS))
+    db_session.add(_make_event("internal-seven", Gender.BOYS))
+    db_session.add(_make_event("public", Gender.BOYS))
+    await db_session.flush()
+
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
+
+    assert [t.guid for t in result] == ["public"]
+
+
+async def test_null_ranga_tournament_is_still_eligible(db_session: AsyncSession):
+    # A NULL ranga is not one of HIDDEN_RANGAS -- it must still show, per
+    # CLAUDE.md step 5.4 ("hiding it would risk losing a real tournament").
+    tournament = _make_tournament("t1", date(2026, 8, 10), _NOW + timedelta(hours=1), ranga=None)
+    db_session.add(tournament)
+    await db_session.flush()
+    db_session.add(_make_event("t1", Gender.BOYS))
+    await db_session.flush()
+
+    result = await crud.get_eligible_tournaments(db_session, Gender.BOYS, AgeCategory.JUNIORZY, _TODAY, _NOW)
+
+    assert [t.guid for t in result] == ["t1"]
+
+
+async def test_ranga_six_and_seven_are_excluded_from_category_counts(db_session: AsyncSession):
+    # A category with only ranga 6/7 tournaments must count as unavailable
+    # -- CLAUDE.md step 5.4: "a category can never be shown as available on
+    # the strength of a tournament the player will then not see."
+    internal = _make_tournament(
+        "internal", date(2026, 8, 10), _NOW + timedelta(hours=1), age_category=AgeCategory.KADECI, ranga=6
+    )
+    db_session.add(internal)
+    await db_session.flush()
+    db_session.add(_make_event("internal", Gender.BOYS))
+    await db_session.flush()
+
+    counts = await crud.get_eligible_tournament_counts_by_category(db_session, Gender.BOYS, _TODAY, _NOW)
+
+    assert counts.get(AgeCategory.KADECI, 0) == 0
+
+
+async def test_null_ranga_tournament_counted_in_category_counts(db_session: AsyncSession):
+    tournament = _make_tournament(
+        "t1", date(2026, 8, 10), _NOW + timedelta(hours=1), age_category=AgeCategory.KADECI, ranga=None
+    )
+    db_session.add(tournament)
+    await db_session.flush()
+    db_session.add(_make_event("t1", Gender.BOYS))
+    await db_session.flush()
+
+    counts = await crud.get_eligible_tournament_counts_by_category(db_session, Gender.BOYS, _TODAY, _NOW)
+
+    assert counts.get(AgeCategory.KADECI) == 1

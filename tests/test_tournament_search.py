@@ -14,6 +14,7 @@ from datetime import date
 from bot.tournament_search import (
     CATEGORY_ORDER,
     MAX_RESULTS,
+    RANGA_PREFIX,
     TournamentOption,
     cap_results,
     category_is_available,
@@ -21,16 +22,21 @@ from bot.tournament_search import (
     category_short_label,
     match_by_place,
     meets_min_place_length,
+    ranga_prefix,
     selection_confirmation_text,
     tournament_label,
 )
 from db.models import AgeCategory
 
-UNIEJOW = TournamentOption(guid="t-uniejow", date_from=date(2026, 8, 29), venue_city="Uniejów", wojewodztwo="łódzkie")
+UNIEJOW = TournamentOption(
+    guid="t-uniejow", date_from=date(2026, 8, 29), venue_city="Uniejów", wojewodztwo="łódzkie", ranga=5
+)
 ZIELONA_GORA = TournamentOption(
     guid="t-zielona-gora", date_from=date(2026, 8, 15), venue_city="Zielona Gora", wojewodztwo="lubuskie"
 )
-NO_CITY = TournamentOption(guid="t-no-city", date_from=date(2026, 8, 20), venue_city=None, wojewodztwo="mazowieckie")
+NO_CITY = TournamentOption(
+    guid="t-no-city", date_from=date(2026, 8, 20), venue_city=None, wojewodztwo="mazowieckie", ranga=3
+)
 
 
 def test_place_matching_is_diacritic_and_case_insensitive():
@@ -79,11 +85,63 @@ def test_meets_min_place_length():
 
 
 def test_tournament_label_uses_venue_city():
-    assert tournament_label(UNIEJOW) == "Uniejów — 2026.08.29"
+    # ranga 5 -> WTK (CLAUDE.md step 5.4).
+    assert tournament_label(UNIEJOW) == "WTK Uniejów - 29.08.2026"
 
 
 def test_tournament_label_falls_back_to_wojewodztwo_when_venue_city_is_null():
-    assert tournament_label(NO_CITY) == "mazowieckie — 2026.08.20"
+    # ranga 3 -> OTK.
+    assert tournament_label(NO_CITY) == "OTK mazowieckie - 20.08.2026"
+
+
+def test_tournament_label_has_no_prefix_when_ranga_is_null():
+    option = TournamentOption(guid="t-null-ranga", date_from=date(2026, 8, 20), venue_city="Radom", wojewodztwo=None)
+    assert tournament_label(option) == "Radom - 20.08.2026"
+
+
+def test_tournament_label_uses_plain_hyphen_not_em_dash():
+    assert "—" not in tournament_label(UNIEJOW)
+    assert " - " in tournament_label(UNIEJOW)
+
+
+def test_ranga_prefix_lookup_for_one_through_seven_and_null():
+    # CLAUDE.md step 5.4: ranga 6/7 (internal club events) are excluded
+    # from the eligible list entirely (see tests/test_tournament_search_db.py)
+    # rather than mapped here, so they have no entry in RANGA_PREFIX.
+    assert ranga_prefix(1) == "MP"
+    assert ranga_prefix(2) == "SS"
+    assert ranga_prefix(3) == "OTK"
+    assert ranga_prefix(4) == "MW"
+    assert ranga_prefix(5) == "WTK"
+    assert ranga_prefix(6) is None
+    assert ranga_prefix(7) is None
+    assert ranga_prefix(None) is None
+    assert 6 not in RANGA_PREFIX
+    assert 7 not in RANGA_PREFIX
+
+
+def test_type_prefix_agrees_with_ranga_for_known_real_combinations():
+    # Sanity check requested in step 5.4: tournaments.type_prefix (scraped
+    # from the tournament name -- see scrapers/tournaments/parser.py's
+    # TYPE_PREFIXES) and the ranga-derived prefix should describe the same
+    # tournament type for every combination PZT actually produces. "OTK SS"
+    # corresponds to ranga 2 (whose derived prefix is the bare "SS" --
+    # scraped names read e.g. "OTK SS ... turniej"), plain "OTK" to ranga 3,
+    # "WTK" to ranga 5, "MW" to ranga 4 (tests/test_tournament_parser.py's
+    # SAMPLE_PAGE fixture exercises the OTK/ranga=3 pair against real PZT
+    # markup). There is no observed ranga=1/"MP" pair: TYPE_PREFIXES never
+    # includes "MP", so a real ranga=1 tournament's name wouldn't match the
+    # scraper's prefix regex at all -- see the PR description.
+    known_type_prefix_by_ranga = {
+        2: "OTK SS",
+        3: "OTK",
+        4: "MW",
+        5: "WTK",
+    }
+    for ranga, type_prefix in known_type_prefix_by_ranga.items():
+        derived = ranga_prefix(ranga)
+        assert derived is not None
+        assert derived in type_prefix.split()
 
 
 def _options(n: int) -> list[TournamentOption]:
@@ -154,7 +212,7 @@ def test_selection_confirmation_contains_town_category_and_date():
     )
     assert "Grodzisk Mazowiecki" in text
     assert "U14" in text
-    assert "2026.08.08" in text
+    assert "08.08.2026" in text
 
 
 def test_category_selected_text_contains_short_form():
