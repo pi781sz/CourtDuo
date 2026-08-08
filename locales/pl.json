@@ -29,7 +29,7 @@
     "results": "Wybierz turniej:",
     "no_place_matches": "Nie znaleziono turniejów dla tej miejscowości.",
     "none_eligible": "Nie znaleziono żadnych turniejów spełniających kryteria w najbliższych {days} dniach.",
-    "show_more": "Pokaż więcej",
+    "too_many_results": "Znaleziono więcej turniejów, niż można pokazać. Pokazano pierwsze 40 — zawęź wyszukiwanie, wpisując miejscowość.",
     "show_all": "Pokaż wszystkie turnieje",
     "change_place": "Zmień miejscowość",
     "tournament_gone": "Ten turniej jest już niedostępny.",

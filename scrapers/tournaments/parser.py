@@ -95,6 +95,27 @@ LABEL_ROZGRYWKI = "Rozgrywki"
 # the town from a "Miejsce turnieju" row.
 _POSTCODE_RE = re.compile(r"^\d{2}-\d{3}\s*")
 
+# Labels PZT sometimes renders inside the same "Miejsce turnieju" value cell,
+# after the address (a trailing "Uwagi:" note, contact details, or a
+# neighbouring field's label bleeding in). These never form part of a town
+# name, so extract_city truncates at the earliest one it finds — defense in
+# depth alongside bounding the value to its own row (step 5.2, "venue_city
+# bleed"). Matched case-insensitively, with or without a trailing colon.
+_CITY_TRUNCATE_LABELS = (
+    "Uwagi",
+    "email",
+    r"tel\.",
+    "Miejsce rozgrywek",
+    r"Termin zgłoszeń",
+    "Organizator",
+    "Dyrektor turnieju",
+    r"Turniej gł\.",
+)
+_CITY_TRUNCATE_RE = re.compile(
+    "(?:" + "|".join(_CITY_TRUNCATE_LABELS) + r")\s*:?",
+    re.IGNORECASE,
+)
+
 _TOURNAMENT_SELECTOR = "div.tournAppContainer_B"
 
 
@@ -217,13 +238,18 @@ def _parse_venue_address(row: Node | None) -> str | None:
     "Miejsce turnieju" renders twice per tournament (summary block and
     Informacje tab); `rows` is in document order, and `_find_row` already
     returns the first match, which is what we want here.
+
+    deep=False bounds this to the value cell's own text, excluding any
+    nested element PZT renders inside the same cell (e.g. an "Uwagi:"
+    note) — without it, .text() recurses into such descendants and the
+    address bleeds into whatever follows (step 5.2, "venue_city bleed").
     """
     if row is None:
         return None
     value_node = _row_value_node(row)
     if value_node is None:
         return None
-    text = value_node.text(separator=" ", strip=True)
+    text = value_node.text(deep=False, separator=" ", strip=True)
     return text or None
 
 
@@ -235,13 +261,20 @@ def extract_city(raw: str) -> str | None:
     """Extracts a town name from a "Miejsce turnieju" row's raw text.
 
     Order of operations (CLAUDE.md, "Tournament selection"):
-    strip a leading postcode, take everything before the first comma (or
-    the whole string if there's none), strip emoji/symbols, collapse
-    whitespace, then Title Case each word. Deliberately does not validate
-    against a list of Polish towns — there is no reliable list, and a
-    wrong one would silently drop real tournaments.
+    truncate at the earliest trailing PZT label (defense in depth against
+    venue_city bleed — see _CITY_TRUNCATE_RE — even though bounding the
+    value to its own row in _parse_venue_address is the real fix), strip a
+    leading postcode, take everything before the first comma (or the whole
+    string if there's none), strip emoji/symbols, collapse whitespace, then
+    Title Case each word. Deliberately does not validate against a list of
+    Polish towns — there is no reliable list, and a wrong one would
+    silently drop real tournaments.
     """
-    text = _POSTCODE_RE.sub("", raw.strip())
+    text = raw.strip()
+    truncate_match = _CITY_TRUNCATE_RE.search(text)
+    if truncate_match:
+        text = text[: truncate_match.start()]
+    text = _POSTCODE_RE.sub("", text.strip())
     text = text.split(",", 1)[0]
     text = "".join(ch for ch in text if ch.isalpha() or ch.isspace() or ch == "-")
     text = re.sub(r"\s+", " ", text).strip()
