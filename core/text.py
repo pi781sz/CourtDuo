@@ -10,6 +10,10 @@ how the player or PZT spelled it.
 
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 _DIACRITIC_MAP = str.maketrans(
     {
         "ą": "a",
@@ -30,3 +34,18 @@ def fold_diacritics(s: str) -> str:
     ó->o ś->s ź->z ż->z. "Uniejów", "UNIEJOW" and "uniejow" all fold to
     "uniejow"."""
     return s.lower().translate(_DIACRITIC_MAP)
+
+
+def first_name(full_name: str) -> str:
+    """Returns the player's first name for display, given PZT's "Nazwisko
+    Imię" (surname first) ordering. "Szewczyk Jagoda" -> "Jagoda".
+
+    Display only -- accounts.full_name keeps the full stored name, and
+    invitation-facing code must keep using full_name so the invitee knows
+    exactly who is asking (CLAUDE.md, "Step 5.5 -- Friendlier greeting")."""
+    tokens = full_name.split()
+    if len(tokens) <= 1:
+        return full_name
+    if len(tokens) > 2:
+        logger.debug("first_name: unexpected token count %d for %r", len(tokens), full_name)
+    return tokens[-1]

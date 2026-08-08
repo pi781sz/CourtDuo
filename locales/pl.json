@@ -3,12 +3,12 @@
     "start": "Zacznij"
   },
   "start": {
-    "greeting": "Cześć! 👋 CourtDuo pomaga młodym zawodnikom PZT zaprosić konkretnego partnera do gry podwójnej na turnieje.",
+    "greeting": "Cześć! 🎾 CourtDuo pomoże Ci znaleźć partnera do debla.",
     "greeting_returning": "Cześć ponownie!"
   },
   "registration": {
     "ask_pzt_id": "Aby zacząć, podaj swój login PZT.",
-    "welcome": "Witaj {full_name}.",
+    "welcome": "Witaj {first_name}.",
     "not_found": "Nie znaleziono zawodnika o takim loginie PZT. Sprawdź login i spróbuj ponownie.",
     "already_bound": "Ten login PZT jest już powiązany z innym kontem Telegram.",
     "too_many_attempts": "Zbyt wiele prób. Spróbuj ponownie za godzinę.",

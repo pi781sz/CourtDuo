@@ -20,6 +20,7 @@ from bot.i18n import t
 from bot.lang import DEFAULT_LANG, lang_for
 from bot.registration import RegistrationOutcome, register_by_pzt_id
 from bot.states import Registration
+from core.text import first_name
 from db import crud
 
 logger = logging.getLogger(__name__)
@@ -73,6 +74,6 @@ async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSessi
         return
 
     account = result.account
-    await message.answer(t("registration.welcome", lang, full_name=account.full_name))
+    await message.answer(t("registration.welcome", lang, first_name=first_name(account.full_name)))
     gender = crud.gender_for_account_code(account.gender)
     await start_tournament_search(message, state, lang_for(account), session, gender)
