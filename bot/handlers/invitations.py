@@ -15,9 +15,9 @@ implies. That order matters twice over:
   player who blocked the bot must not cost the other three players their
   answer, so bot.notifications.push reports failure instead of raising.
   The one case where a failed push does change the outcome is a brand new
-  invitation: an invitation nobody can see must not sit 🟠 pending
+  invitation: an invitation nobody can see must not sit ⚪ pending
   forever, so it is cancelled and the inviter is told (CLAUDE.md's "do not
-  leave the inviter waiting on a 🟠 that can never resolve").
+  leave the inviter waiting on a ⚪ that can never resolve").
 
 The three answer handlers carry no state filter. The invitee may be
 anywhere — mid tournament search, or in no state at all — and answering an
@@ -65,10 +65,12 @@ from bot.keyboards.invitations import (
     RejectInvitationCallback,
     invitation_answer_keyboard,
 )
+from bot.keyboards.navigation import find_partner_keyboard
 from bot.lang import lang_for
 from bot.notifications import push
 from bot.states import InvitationSend, PartnerSelection
 from bot.tournament_search import label_for_tournament
+from core.text import display_name
 from db import crud
 from db.models import Account, Invitation, InvitationState
 
@@ -165,7 +167,13 @@ async def _notify_cancelled(
         account, _ = await _participant(session, pzt_id)
         if account is None:
             continue
-        await push(bot, account.telegram_id, t("invitation.partner_found_elsewhere", account.lang or lang))
+        recipient_lang = account.lang or lang
+        await push(
+            bot,
+            account.telegram_id,
+            t("invitation.partner_found_elsewhere", recipient_lang),
+            reply_markup=find_partner_keyboard(recipient_lang),
+        )
 
 
 # --- Inviter: the confirmation screen ------------------------------------------
@@ -201,7 +209,7 @@ async def handle_confirm_send(
         name = invitee.full_name
         if result.inviter_partner_pzt_id is not None:
             _, name = await _participant(session, result.inviter_partner_pzt_id)
-        await callback.message.answer(t(_SEND_FAILURE_KEYS[result.failure], lang, name=name))
+        await callback.message.answer(t(_SEND_FAILURE_KEYS[result.failure], lang, name=display_name(name)))
         if result.failure in _SEND_FAILURES_RESTARTING_SEARCH:
             gender = crud.gender_for_account_code(account.gender)
             await start_tournament_search(callback.message, state, lang, session, gender)
@@ -224,11 +232,11 @@ async def handle_confirm_send(
     )
     if not delivered:
         # Nobody will ever answer this one, so it must not count against
-        # the inviter's three pending invitations or sit 🟠 for weeks.
+        # the inviter's three pending invitations or sit ⚪ for weeks.
         invitation.state = InvitationState.CANCELLED
         await session.commit()
         logger.warning("Invitation %s cancelled: could not be delivered", invitation.id)
-        await callback.message.answer(t("invitation.delivery_failed", lang, name=invitee.full_name))
+        await callback.message.answer(t("invitation.delivery_failed", lang, name=display_name(invitee.full_name)))
         await state.set_state(PartnerSelection.waiting_name)
         return
 
@@ -266,7 +274,9 @@ async def handle_accept(
     await _clear_buttons(callback)
     await callback.answer()
     if account is None:
-        await callback.message.answer(t("invitation.no_longer_valid", lang))
+        await callback.message.answer(
+            t("invitation.no_longer_valid", lang), reply_markup=find_partner_keyboard(lang)
+        )
         return
 
     result = await accept_invitation(session, callback_data.invitation_id, account.pzt_id, _now())
@@ -284,10 +294,13 @@ async def handle_accept(
                 )
                 _, partner_name = await _participant(session, partner_pzt_id)
                 await callback.message.answer(
-                    t("partner_selection.inviter_already_matched", lang, name=partner_name)
+                    t("partner_selection.inviter_already_matched", lang, name=display_name(partner_name)),
+                    reply_markup=find_partner_keyboard(lang),
                 )
                 return
-        await callback.message.answer(t(_RESPOND_FAILURE_KEYS[result.failure], lang))
+        await callback.message.answer(
+            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=find_partner_keyboard(lang)
+        )
         return
 
     invitation = result.invitation
@@ -297,12 +310,14 @@ async def handle_accept(
     matched_pair = (invitation.inviter_pzt_id, invitation.invitee_pzt_id)
     await session.commit()
 
-    await callback.message.answer(matched_text(inviter_name, label, lang))
+    await callback.message.answer(matched_text(inviter_name, label, lang), reply_markup=find_partner_keyboard(lang))
     if inviter_account is not None:
+        inviter_lang = inviter_account.lang or lang
         await push(
             bot,
             inviter_account.telegram_id,
-            accepted_inviter_text(account.full_name, account.gender, label, inviter_account.lang or lang),
+            accepted_inviter_text(account.full_name, account.gender, label, inviter_lang),
+            reply_markup=find_partner_keyboard(inviter_lang),
         )
     await _notify_cancelled(bot, session, result, matched_pair, lang)
 
@@ -330,13 +345,17 @@ async def _handle_simple_answer(
     await _clear_buttons(callback)
     await callback.answer()
     if account is None:
-        await callback.message.answer(t("invitation.no_longer_valid", lang))
+        await callback.message.answer(
+            t("invitation.no_longer_valid", lang), reply_markup=find_partner_keyboard(lang)
+        )
         return
 
     result = await answer(session, invitation_id, account.pzt_id, _now())
     if result.failure is not None:
         await session.commit()
-        await callback.message.answer(t(_RESPOND_FAILURE_KEYS[result.failure], lang))
+        await callback.message.answer(
+            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=find_partner_keyboard(lang)
+        )
         return
 
     invitation = result.invitation
@@ -345,12 +364,16 @@ async def _handle_simple_answer(
     inviter_account, inviter_name = await _participant(session, invitation.inviter_pzt_id)
     await session.commit()
 
-    await callback.message.answer(invitee_text(inviter_name, account.gender, label, lang))
+    await callback.message.answer(
+        invitee_text(inviter_name, account.gender, label, lang), reply_markup=find_partner_keyboard(lang)
+    )
     if inviter_account is not None:
+        inviter_lang = inviter_account.lang or lang
         await push(
             bot,
             inviter_account.telegram_id,
-            inviter_text(account.full_name, account.gender, label, inviter_account.lang or lang),
+            inviter_text(account.full_name, account.gender, label, inviter_lang),
+            reply_markup=find_partner_keyboard(inviter_lang),
         )
 
 

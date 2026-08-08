@@ -12,7 +12,7 @@ would abort the handler after the transaction had already decided the
 match, leaving the two players matched in the database and told nothing.
 So `push` swallows the API's failures, logs them and reports whether the
 message landed, and callers decide what a failed delivery means. For a new
-invitation it means the invitation must not stay 🟠 pending against a
+invitation it means the invitation must not stay ⚪ pending against a
 player who will never see it (see bot.handlers.invitations); for a status
 update it means nothing beyond the log line.
 

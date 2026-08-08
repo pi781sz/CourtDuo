@@ -31,7 +31,7 @@ from bot.i18n import t
 from bot.invitation_send import start_invitation_send
 from bot.keyboards.tournament_search import category_keyboard
 from bot.states import PartnerSelection, TournamentSearch
-from core.text import fold_diacritics
+from core.text import display_name, fold_diacritics
 from db import crud
 from db.models import Account, AgeCategory, Player, Tournament
 from entitlements import can_send_invitation
@@ -158,12 +158,13 @@ async def _resolve_candidate_ranking(
 
 
 def _candidate_label(full_name: str, ranking: tuple[str, int | None] | None, lang: str) -> str:
+    name = display_name(full_name)
     if ranking is None:
-        return t("partner_selection.candidate_no_ranking", lang, name=full_name)
+        return t("partner_selection.candidate_no_ranking", lang, name=name)
     list_code, position = ranking
     if position is None:
-        return t("partner_selection.candidate_label_no_position", lang, name=full_name, list=list_code)
-    return t("partner_selection.candidate_label", lang, name=full_name, list=list_code, position=position)
+        return t("partner_selection.candidate_label_no_position", lang, name=name, list=list_code)
+    return t("partner_selection.candidate_label", lang, name=name, list=list_code, position=position)
 
 
 async def build_candidate_options(
@@ -249,7 +250,7 @@ async def handle_partner_candidate(
     """
     failure = await run_pre_invitation_checks(session, account, tournament, candidate)
     if failure is not None:
-        await message.answer(t(_CHECK_FAILURE_MESSAGE_KEYS[failure], lang, name=candidate.full_name))
+        await message.answer(t(_CHECK_FAILURE_MESSAGE_KEYS[failure], lang, name=display_name(candidate.full_name)))
         return
 
     # CLAUDE.md, "Monetisation": every invitation must route through this
@@ -282,7 +283,7 @@ async def start_partner_selection(
             matched.invitee_pzt_id if matched.inviter_pzt_id == account.pzt_id else matched.inviter_pzt_id
         )
         partner = await crud.get_player_by_pzt_id(session, partner_pzt_id)
-        await message.answer(t("partner_selection.inviter_already_matched", lang, name=partner.full_name))
+        await message.answer(t("partner_selection.inviter_already_matched", lang, name=display_name(partner.full_name)))
 
         # No name to ask for -- CLAUDE.md, "Never dead-end": offer a way
         # back to the tournament list rather than leaving nothing to tap.

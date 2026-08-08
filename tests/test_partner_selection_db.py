@@ -151,8 +151,8 @@ async def test_disambiguation_same_name_same_ranking_list_uses_position(db_sessi
     options = await build_candidate_options(db_session, candidates, AgeCategory.MLODZICY, "pl")
     labels = {option.pzt_id: option.label for option in options}
 
-    assert labels["INV010"] == "Nowak Maja — W14, poz. 34"
-    assert labels["INV011"] == "Nowak Maja — W14, poz. 112"
+    assert labels["INV010"] == "Maja Nowak — W14, poz. 34"
+    assert labels["INV011"] == "Maja Nowak — W14, poz. 112"
 
 
 async def test_disambiguation_falls_back_to_players_own_list(db_session: AsyncSession):
@@ -173,8 +173,8 @@ async def test_disambiguation_falls_back_to_players_own_list(db_session: AsyncSe
     options = await build_candidate_options(db_session, candidates, AgeCategory.MLODZICY, "pl")
     labels = {option.pzt_id: option.label for option in options}
 
-    assert labels["INV020"] == "Kowalska Zofia — W14, poz. 5"
-    assert labels["INV021"] == "Kowalska Zofia — W16, poz. 9"
+    assert labels["INV020"] == "Zofia Kowalska — W14, poz. 5"
+    assert labels["INV021"] == "Zofia Kowalska — W16, poz. 9"
 
 
 async def test_disambiguation_candidate_with_no_ranking_row_shown_without_dropping(db_session: AsyncSession):
@@ -192,8 +192,8 @@ async def test_disambiguation_candidate_with_no_ranking_row_shown_without_droppi
     options = await build_candidate_options(db_session, candidates, AgeCategory.MLODZICY, "pl")
     labels = {option.pzt_id: option.label for option in options}
 
-    assert labels["INV030"] == "Wisniewski Adam — M14, poz. 20"
-    assert labels["INV031"] == "Wisniewski Adam — brak rankingu w bazie"
+    assert labels["INV030"] == "Adam Wisniewski — M14, poz. 20"
+    assert labels["INV031"] == "Adam Wisniewski — brak rankingu w bazie"
 
 
 # --- the six pre-invitation checks -------------------------------------------
@@ -251,7 +251,7 @@ async def test_check_3_inviter_already_matched_skips_the_name_prompt(db_session:
 
     assert await state.get_state() == TournamentSearch.waiting_category.state
     texts = [call.args[0] for call in message.answer.call_args_list]
-    assert any("Testowa Ola" in text for text in texts)
+    assert any("Ola Testowa" in text for text in texts)
     # Never dead-ends: a category keyboard is attached to one of the replies.
     assert any(call.kwargs.get("reply_markup") is not None for call in message.answer.call_args_list)
 
@@ -276,7 +276,7 @@ async def test_check_3_finds_partner_regardless_of_which_side_inviter_was(db_ses
     await start_partner_selection(message, state, "pl", db_session, account, tournament)
 
     texts = [call.args[0] for call in message.answer.call_args_list]
-    assert any("Testowa Ola" in text for text in texts)
+    assert any("Ola Testowa" in text for text in texts)
 
 
 async def test_check_4_invitee_already_matched_does_not_reveal_partner(db_session: AsyncSession):
@@ -362,7 +362,7 @@ async def test_all_checks_pass_hands_off_to_the_confirmation_screen(db_session: 
     assert await state.get_state() == InvitationSend.waiting_confirmation.state
     # Step 7's confirmation screen, warning before anything is written.
     text = message.answer.call_args.args[0]
-    assert text.startswith("Zaproszenie do: Testowa Ola")
+    assert text.startswith("Zaproszenie do: Ola Testowa")
     assert "Uwaga: po akceptacji nie można zmienić partnera." in text
     assert message.answer.call_args.kwargs["reply_markup"] is not None
 
@@ -389,6 +389,6 @@ async def test_a_named_player_who_does_not_use_courtduo_gets_no_confirmation_scr
     await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
 
     texts = [call.args[0] for call in message.answer.call_args_list]
-    assert texts == ["Testowa Ola nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby."]
+    assert texts == ["Ola Testowa nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby."]
     # Still at the name prompt, free to try somebody else.
     assert await state.get_state() == PartnerSelection.waiting_name.state

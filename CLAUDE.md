@@ -48,6 +48,8 @@ Gender is derived from which ranking list the player appears in:
 
 *(Multi-player accounts — a parent with two children — are not in scope now. Do not design them away, but do not build them.)*
 
+**Name order: storage is PZT's, display is not.** PZT stores names "Nazwisko Imię" (surname first) — `accounts.full_name` and `players.full_name` keep that order permanently, and name matching (see "Tournament selection" → partner name entry) accepts either order. But every user-facing message must show "Imię Nazwisko" instead: "Szewczyk Jagoda" → "Jagoda Szewczyk". `core.text.display_name` does this reordering (first token is the surname, every remaining token is a given name) and every place a player's name is shown — invitations, accept/reject/not-attending notifications, "already has a partner" checks, disambiguation buttons — must go through it. `core.text.first_name`, used only for the player's own welcome greeting, returns just the first given name — the *second* token, since the first is the surname.
+
 ---
 
 ## User journeys
@@ -69,7 +71,7 @@ Adam:  Peter Lorenz
 Bot:   [confirmation screen, warns the match cannot be cancelled]
 Adam:  [confirms]
 Bot:   Zaproszenie zostało wysłane. Czekaj na odpowiedź.
-       🟠 Peter Lorenz — <tournament> — zaproszenie oczekujące
+       ⚪ Peter Lorenz — <tournament> — zaproszenie oczekujące
 ```
 
 Peter simultaneously receives:
@@ -86,7 +88,7 @@ Uwaga: po akceptacji nie można zmienić partnera.
 
 **On Odrzuć** — Peter sees 🔴 *"Odrzuciłeś zaproszenie od Adam Smith — <tournament>"*. Adam's status flips to 🔴 *odmowa* with the name and tournament.
 
-**On Nie jadę na ten turniej** — Peter sees *"Odpowiedziałeś, że nie jedziesz na ten turniej."* Adam's status flips to a neutral ⚪ *"Peter Lorenz nie jedzie na ten turniej."*, distinct from 🔴 *odmowa*. This closes that one invitation only — see "Spec change: a third invitation response" under Invitation engine.
+**On Nie jadę na ten turniej** — Peter sees *"Odpowiedziałeś, że nie jedziesz na ten turniej."* Adam's status flips to a neutral 🟠 *"Peter Lorenz nie jedzie na ten turniej."*, distinct from 🔴 *odmowa*. This closes that one invitation only — see "Spec change: a third invitation response" under Invitation engine.
 
 ### Scenario 2 — the invited player is not on CourtDuo
 
@@ -209,7 +211,7 @@ An invitation gets a third button alongside Zatwierdź and Odrzuć: **"Nie jadę
 - `NOT_ATTENDING` closes that one invitation and nothing else.
 - It is explicitly **not** a stored fact about the player and the tournament: it must not block, hide or filter any future invitation to that player for that tournament. Players change their minds, enter late, and withdraw. Do not design a "not attending" table or flag — this is purely a terminal state on the one `Invitation` row.
 - The invitee sees: *"Odpowiedziałeś, że nie jedziesz na ten turniej."*
-- The inviter sees a neutral status, distinct from 🔴 odmowa: ⚪ *"Peter Lorenz nie jedzie na ten turniej."*
+- The inviter sees a neutral status, distinct from 🔴 odmowa: 🟠 *"Peter Lorenz nie jedzie na ten turniej."*
 - The inviter may immediately invite someone else, exactly as with rejection.
 
 ---
@@ -218,10 +220,12 @@ An invitation gets a third button alongside Zatwierdź and Odrzuć: **"Nie jadę
 
 A `/moje_zaproszenia` command lists everything for this player:
 
-- 🟠 pending — name, tournament, date
+- ⚪ pending — name, tournament, date
 - 🟢 accepted — partner, tournament, date
 - 🔴 rejected — name, tournament
-- ⚪ not attending *(spec change, not built until step 7)* — name, tournament
+- 🟠 not attending *(spec change, not built until step 7)* — name, tournament
+
+**A terminal message always carries a way back.** "Never dead-end" (see "Tournament selection") applies to notifications, not just search results: any message that ends a flow — a rejection, a "nie jedzie" notice, a "ten zawodnik znalazł już partnera" cancellation, the match confirmation both players get on Zatwierdź — carries a "Znajdź partnera" button that returns the player straight to the age-category screen. `/start` must never be the only way forward.
 
 ---
 
