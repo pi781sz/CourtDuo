@@ -10,14 +10,16 @@ from __future__ import annotations
 from datetime import date
 
 from bot.handlers.tournament_search import _results_text
+from bot.keyboards.navigation import FindPartnerCallback, MojeDebleCallback
 from bot.keyboards.tournament_search import (
     ChangeCategoryCallback,
     ChangePlaceCallback,
+    category_keyboard,
     no_matches_keyboard,
     none_eligible_keyboard,
     results_keyboard,
 )
-from bot.tournament_search import MAX_RESULTS, TournamentOption, cap_results
+from bot.tournament_search import CATEGORY_ORDER, MAX_RESULTS, TournamentOption, cap_results
 
 _NAV_BUTTON_COUNT = 2  # "Zmień miejscowość" + "Zmień kategorię wiekową"
 
@@ -91,6 +93,20 @@ def test_no_matches_keyboard_still_offers_show_all_and_change_place():
     assert any("wszystkie" in text.lower() for text in texts)
     assert any("miejscowość" in text.lower() for text in texts)
     assert any("kategori" in text.lower() for text in texts)
+
+
+def test_category_keyboard_offers_moje_deble_and_find_partner_too():
+    # CLAUDE.md build order step 8: "Add 'Moje deble' alongside 'Znajdź
+    # partnera' on the age-category screen too."
+    counts = {category: 1 for category in CATEGORY_ORDER}
+    markup = category_keyboard(counts, "pl")
+
+    texts = _all_button_texts(markup)
+    assert "Moje deble" in texts
+    assert "Znajdź partnera" in texts
+    prefixes = _callback_prefixes(markup)
+    assert MojeDebleCallback.__prefix__ in prefixes
+    assert FindPartnerCallback.__prefix__ in prefixes
 
 
 def test_no_pagination_callback_classes_remain():

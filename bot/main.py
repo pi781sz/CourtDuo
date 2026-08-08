@@ -3,8 +3,8 @@
 
 Registers one router per feature (CLAUDE.md build order step 4:
 registration; step 5: tournament selection by place; step 6: partner name
-entry; step 7: invitation send/accept/reject). Later steps add routers
-here rather than growing these.
+entry; step 7: invitation send/accept/reject; step 8: the Moje deble status
+view). Later steps add routers here rather than growing these.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from bot.handlers import (
     invitations_router,
+    moje_deble_router,
     navigation_router,
     partner_selection_router,
     start_router,
@@ -51,6 +52,7 @@ async def main() -> None:
     dispatcher.include_router(partner_selection_router)
     dispatcher.include_router(invitations_router)
     dispatcher.include_router(navigation_router)
+    dispatcher.include_router(moje_deble_router)
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)
