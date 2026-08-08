@@ -329,7 +329,7 @@ async def not_attending_invitation(
     block, hide or filter a future invitation to the same player for the
     same tournament, and nothing may start — players change their minds,
     enter late and withdraw. Only the wording the two sides see differs
-    (bot.invitation_text), so the inviter gets a neutral ⚪ rather than a
+    (bot.invitation_text), so the inviter gets a neutral 🟠 rather than a
     🔴 refusal.
     """
     return await _answer_without_matching(

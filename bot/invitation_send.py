@@ -27,6 +27,7 @@ from bot.invitation_text import confirmation_text
 from bot.keyboards.invitations import confirm_send_keyboard
 from bot.states import InvitationSend
 from bot.tournament_search import label_for_tournament
+from core.text import display_name
 from db import crud
 from db.models import Account, Player, Tournament
 
@@ -48,7 +49,7 @@ async def start_invitation_send(
         # step 9; until then, say so and let them type another name rather
         # than show a confirmation screen that cannot lead anywhere. The
         # player stays in PartnerSelection.waiting_name.
-        await message.answer(t("invitation.invitee_not_on_courtduo", lang, name=invitee.full_name))
+        await message.answer(t("invitation.invitee_not_on_courtduo", lang, name=display_name(invitee.full_name)))
         return
 
     await state.update_data(partner_pzt_id=invitee.pzt_id)

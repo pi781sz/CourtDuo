@@ -131,6 +131,22 @@ def _answers(callback: MagicMock) -> list[str]:
     return [call.args[0] for call in callback.message.answer.call_args_list]
 
 
+def _button_texts(markup) -> list[str]:
+    return [button.text for row in markup.inline_keyboard for button in row]
+
+
+def _answer_markups(callback: MagicMock) -> list:
+    return [call.kwargs.get("reply_markup") for call in callback.message.answer.call_args_list]
+
+
+def _push_markups(bot: MagicMock) -> dict[int, list]:
+    markups: dict[int, list] = {}
+    for call in bot.send_message.call_args_list:
+        chat_id = call.args[0] if call.args else call.kwargs["chat_id"]
+        markups.setdefault(chat_id, []).append(call.kwargs.get("reply_markup"))
+    return markups
+
+
 async def _state_for(telegram_id: int, tournament_guid: str, partner_pzt_id: str) -> FSMContext:
     state = FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=telegram_id, user_id=telegram_id))
     await state.update_data(
@@ -155,20 +171,21 @@ async def test_confirming_sends_the_invitation_to_the_invitee(db_session: AsyncS
 
     pushed = _pushes(bot)
     assert list(pushed) == [8002]
-    # The invitee is told who is asking, in full, and warned before they
-    # can tap anything (CLAUDE.md).
+    # The invitee is told who is asking, in full and reordered to "Imię
+    # Nazwisko" (CLAUDE.md, step 7.1), and warned before they can tap
+    # anything (CLAUDE.md).
     assert pushed[8002][0] == (
-        f"Testowa Anna zaprasza Cię do gry podwójnej.\n{_LABEL}\n"
+        f"Anna Testowa zaprasza Cię do gry podwójnej.\n{_LABEL}\n"
         "Uwaga: po akceptacji nie można zmienić partnera."
     )
     # Three buttons and no text entry: Zatwierdź, Odrzuć, Nie jadę.
     markup = bot.send_message.call_args.kwargs["reply_markup"]
-    assert [button.text for row in markup.inline_keyboard for button in row] == [
+    assert _button_texts(markup) == [
         "Zatwierdź",
         "Odrzuć",
         "Nie jadę na ten turniej",
     ]
-    assert _answers(callback) == [f"Zaproszenie zostało wysłane. Czekaj na odpowiedź.\n🟠 Testowa Jagoda — {_LABEL}"]
+    assert _answers(callback) == [f"Zaproszenie zostało wysłane. Czekaj na odpowiedź.\n⚪ Jagoda Testowa — {_LABEL}"]
     assert await crud.count_pending_outgoing_invitations(db_session, "HND001", _GUID) == 1
     # Free to name somebody else straight away, up to three pending.
     assert await state.get_state() == PartnerSelection.waiting_name.state
@@ -187,7 +204,7 @@ async def test_an_undeliverable_invitation_is_cancelled_rather_than_left_pending
     await handle_confirm_send(callback, state, db_session, bot)
 
     assert _answers(callback) == [
-        "Nie udało się dostarczyć zaproszenia do Testowa Jagoda. Wpisz imię i nazwisko innej osoby."
+        "Nie udało się dostarczyć zaproszenia do Jagoda Testowa. Wpisz imię i nazwisko innej osoby."
     ]
     assert await crud.count_pending_outgoing_invitations(db_session, "HND010", _GUID) == 0
     assert await state.get_state() == PartnerSelection.waiting_name.state
@@ -211,7 +228,7 @@ async def test_confirming_a_player_who_gained_a_partner_meanwhile_is_refused(db_
     await handle_confirm_send(callback, await _state_for(8020, _GUID, "HND021"), db_session, bot)
 
     # Never reveals who that partner is (CLAUDE.md) -- and nothing was pushed.
-    assert _answers(callback) == ["Testowa Jagoda ma już partnera na ten turniej.\nWpisz imię i nazwisko innej osoby."]
+    assert _answers(callback) == ["Jagoda Testowa ma już partnera na ten turniej.\nWpisz imię i nazwisko innej osoby."]
     assert bot.send_message.await_count == 0
 
 
@@ -238,14 +255,18 @@ async def test_accept_tells_both_sides_and_every_cancelled_player(db_session: As
     bot = _make_bot()
     await handle_accept(callback, AcceptInvitationCallback(invitation_id=chosen.id), db_session, bot)
 
-    assert _answers(callback) == [f"🟢 Partner: Testowa Anna — {_LABEL}"]
+    assert _answers(callback) == [f"🟢 Partner: Anna Testowa — {_LABEL}"]
+    # A successful match is a terminal message: a way back (CLAUDE.md, step 7.1).
+    assert _button_texts(_answer_markups(callback)[0]) == ["Znajdź partnera"]
     pushed = _pushes(bot)
     # The inviter: the alert, then her own 🟢 status. Feminine verb.
-    assert pushed[8030] == [f"Testowa Jagoda przyjęła zaproszenie.\n🟢 Partner: Testowa Jagoda — {_LABEL}"]
+    assert pushed[8030] == [f"Jagoda Testowa przyjęła zaproszenie.\n🟢 Partner: Jagoda Testowa — {_LABEL}"]
     # Both cancelled counterparties, and nobody else.
     assert pushed[8032] == ["Ten zawodnik znalazł już partnera."]
     assert pushed[8033] == ["Ten zawodnik znalazł już partnera."]
     assert set(pushed) == {8030, 8032, 8033}
+    push_markups = _push_markups(bot)
+    assert all(_button_texts(markup) == ["Znajdź partnera"] for markups in push_markups.values() for markup in markups)
 
 
 async def test_accept_still_matches_when_the_inviter_has_blocked_the_bot(db_session: AsyncSession):
@@ -265,7 +286,7 @@ async def test_accept_still_matches_when_the_inviter_has_blocked_the_bot(db_sess
         callback, AcceptInvitationCallback(invitation_id=invitation.id), db_session, _make_bot(fail_for={8040})
     )
 
-    assert _answers(callback) == [f"🟢 Partner: Testowa Anna — {_LABEL}"]
+    assert _answers(callback) == [f"🟢 Partner: Anna Testowa — {_LABEL}"]
     assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.ACCEPTED
 
 
@@ -294,8 +315,11 @@ async def test_reject_tells_the_inviter_with_the_right_verb_for_a_boy(db_session
     bot = _make_bot()
     await handle_reject(callback, RejectInvitationCallback(invitation_id=invitation.id), db_session, bot)
 
-    assert _answers(callback) == [f"🔴 Odrzuciłeś zaproszenie od Testowy Adam — {_LABEL}."]
-    assert _pushes(bot)[8050] == [f"🔴 Testowy Marek odrzucił zaproszenie — {_LABEL}."]
+    assert _answers(callback) == [f"🔴 Odrzuciłeś zaproszenie od Adam Testowy — {_LABEL}."]
+    # A rejection ends the flow for both sides: each gets a way back.
+    assert _button_texts(_answer_markups(callback)[0]) == ["Znajdź partnera"]
+    assert _pushes(bot)[8050] == [f"🔴 Marek Testowy odrzucił zaproszenie — {_LABEL}."]
+    assert _button_texts(_push_markups(bot)[8050][0]) == ["Znajdź partnera"]
     assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.REJECTED
 
 
@@ -314,8 +338,10 @@ async def test_not_attending_tells_the_inviter_something_neutral(db_session: Asy
     await handle_not_attending(callback, NotAttendingCallback(invitation_id=invitation.id), db_session, bot)
 
     assert _answers(callback) == ["Odpowiedziałaś, że nie jedziesz na ten turniej."]
-    # ⚪, not 🔴: distinct from a refusal (CLAUDE.md).
-    assert _pushes(bot)[8060] == ["⚪ Testowa Jagoda nie jedzie na ten turniej."]
+    assert _button_texts(_answer_markups(callback)[0]) == ["Znajdź partnera"]
+    # 🟠, not 🔴: distinct from a refusal (CLAUDE.md).
+    assert _pushes(bot)[8060] == ["🟠 Jagoda Testowa nie jedzie na ten turniej."]
+    assert _button_texts(_push_markups(bot)[8060][0]) == ["Znajdź partnera"]
     assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.NOT_ATTENDING
 
 
@@ -340,4 +366,5 @@ async def test_answering_an_already_cancelled_invitation_says_so_without_changin
     await handle_accept(callback, AcceptInvitationCallback(invitation_id=to_ola.id), db_session, _make_bot())
 
     assert _answers(callback) == ["Ten zawodnik znalazł już partnera."]
+    assert _button_texts(_answer_markups(callback)[0]) == ["Znajdź partnera"]
     assert (await crud.get_invitation_by_id(db_session, to_ola.id)).state is InvitationState.CANCELLED

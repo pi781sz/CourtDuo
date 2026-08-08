@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 
 from bot.handlers import (
     invitations_router,
+    navigation_router,
     partner_selection_router,
     start_router,
     tournament_search_router,
@@ -49,6 +50,7 @@ async def main() -> None:
     dispatcher.include_router(tournament_search_router)
     dispatcher.include_router(partner_selection_router)
     dispatcher.include_router(invitations_router)
+    dispatcher.include_router(navigation_router)
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)

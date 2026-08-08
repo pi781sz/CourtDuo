@@ -19,6 +19,12 @@ Nothing here is a message *between* players: every string is pre-defined
 and every screen is buttons (CLAUDE.md, non-negotiable rule 1). No
 composition path ever interpolates player-supplied text — only names,
 tournament labels and dates that came from PZT.
+
+Every name interpolated below goes through core.text.display_name first:
+PZT stores "Nazwisko Imię" (surname first), and every user-facing message
+must show "Imię Nazwisko" instead (CLAUDE.md, step 7.1, "Name order").
+Callers pass the raw stored full_name in; this module is where it gets
+reordered for display, once, so nobody downstream double-applies it.
 """
 
 from __future__ import annotations
@@ -26,6 +32,7 @@ from __future__ import annotations
 import logging
 
 from bot.i18n import t
+from core.text import display_name
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +62,7 @@ def confirmation_text(partner_name: str, tournament: str, lang: str) -> str:
     "cannot change partner" warning must come *before* confirming)."""
     return "\n".join(
         (
-            t("invitation.confirm_partner", lang, name=partner_name),
+            t("invitation.confirm_partner", lang, name=display_name(partner_name)),
             t("invitation.confirm_tournament", lang, tournament=tournament),
             t("invitation.warning_cannot_change", lang),
         )
@@ -66,7 +73,7 @@ def sent_text(partner_name: str, tournament: str, lang: str) -> str:
     return "\n".join(
         (
             t("invitation.sent", lang),
-            t("invitation.status_pending", lang, name=partner_name, tournament=tournament),
+            t("invitation.status_pending", lang, name=display_name(partner_name), tournament=tournament),
         )
     )
 
@@ -77,14 +84,14 @@ def sent_text(partner_name: str, tournament: str, lang: str) -> str:
 def invitation_text(inviter_full_name: str, tournament: str, lang: str) -> str:
     """What the invited player receives.
 
-    `inviter_full_name` is the full name, never core.text.first_name():
-    the invitee is agreeing to something neither side can undo, so they
-    must know exactly who is asking. first_name() is for greeting a player
-    about themselves.
+    `inviter_full_name` is the full name (reordered to "Imię Nazwisko" via
+    display_name()), never core.text.first_name(): the invitee is agreeing
+    to something neither side can undo, so they must know exactly who is
+    asking. first_name() is for greeting a player about themselves.
     """
     return "\n".join(
         (
-            t("invitation.received", lang, name=inviter_full_name),
+            t("invitation.received", lang, name=display_name(inviter_full_name)),
             tournament,
             t("invitation.warning_cannot_change", lang),
         )
@@ -96,14 +103,14 @@ def invitation_text(inviter_full_name: str, tournament: str, lang: str) -> str:
 
 def matched_text(partner_full_name: str, tournament: str, lang: str) -> str:
     """The 🟢 line both sides see once an invitation is accepted."""
-    return t("invitation.status_matched", lang, name=partner_full_name, tournament=tournament)
+    return t("invitation.status_matched", lang, name=display_name(partner_full_name), tournament=tournament)
 
 
 def accepted_inviter_text(invitee_full_name: str, invitee_gender: str | None, tournament: str, lang: str) -> str:
     """The inviter's alert plus their new 🟢 status, in one message."""
     return "\n".join(
         (
-            gendered("invitation.accepted_inviter", invitee_gender, lang, name=invitee_full_name),
+            gendered("invitation.accepted_inviter", invitee_gender, lang, name=display_name(invitee_full_name)),
             matched_text(invitee_full_name, tournament, lang),
         )
     )
@@ -115,7 +122,7 @@ def rejected_invitee_text(
     """What the invitee sees after tapping Odrzuć — second person, so it
     inflects for the invitee's own gender."""
     return gendered(
-        "invitation.rejected_invitee", invitee_gender, lang, name=inviter_full_name, tournament=tournament
+        "invitation.rejected_invitee", invitee_gender, lang, name=display_name(inviter_full_name), tournament=tournament
     )
 
 
@@ -123,7 +130,7 @@ def rejected_inviter_text(invitee_full_name: str, invitee_gender: str | None, to
     """What the inviter sees — third person about the invitee, so it
     inflects for the invitee's gender."""
     return gendered(
-        "invitation.rejected_inviter", invitee_gender, lang, name=invitee_full_name, tournament=tournament
+        "invitation.rejected_inviter", invitee_gender, lang, name=display_name(invitee_full_name), tournament=tournament
     )
 
 
@@ -132,6 +139,6 @@ def not_attending_invitee_text(invitee_gender: str | None, lang: str) -> str:
 
 
 def not_attending_inviter_text(invitee_full_name: str, lang: str) -> str:
-    """Neutral ⚪, visually distinct from the 🔴 of a refusal — and not
+    """Neutral 🟠, visually distinct from the 🔴 of a refusal — and not
     gendered: "nie jedzie" is the same for everyone."""
-    return t("invitation.not_attending_inviter", lang, name=invitee_full_name)
+    return t("invitation.not_attending_inviter", lang, name=display_name(invitee_full_name))

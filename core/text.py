@@ -37,15 +37,36 @@ def fold_diacritics(s: str) -> str:
 
 
 def first_name(full_name: str) -> str:
-    """Returns the player's first name for display, given PZT's "Nazwisko
-    Imię" (surname first) ordering. "Szewczyk Jagoda" -> "Jagoda".
+    """Returns the player's first given name for display, given PZT's
+    "Nazwisko Imię" (surname first) ordering: the FIRST token is the
+    surname, so the first given name is the SECOND token.
+    "Szewczyk Jagoda" -> "Jagoda". "Kowalski Jan Piotr" -> "Jan".
 
     Display only -- accounts.full_name keeps the full stored name, and
-    invitation-facing code must keep using full_name so the invitee knows
-    exactly who is asking (CLAUDE.md, "Step 5.5 -- Friendlier greeting")."""
+    invitation-facing code must keep using full_name (via display_name(),
+    not first_name()) so the invitee knows exactly who is asking
+    (CLAUDE.md, "Step 5.5 -- Friendlier greeting")."""
     tokens = full_name.split()
     if len(tokens) <= 1:
         return full_name
     if len(tokens) > 2:
         logger.debug("first_name: unexpected token count %d for %r", len(tokens), full_name)
-    return tokens[-1]
+    return tokens[1]
+
+
+def display_name(full_name: str) -> str:
+    """Reorders PZT's stored "Nazwisko Imię" (surname first) into "Imię
+    Nazwisko" for display: the FIRST token is the surname, every remaining
+    token is a given name. "Szewczyk Jagoda" -> "Jagoda Szewczyk".
+    "Kowalski Jan Piotr" -> "Jan Piotr Kowalski". A single token (no
+    surname to move) and the empty string pass through unchanged. Never
+    raises.
+
+    Storage is unchanged -- accounts.full_name and players.full_name keep
+    PZT's order; this is display only (CLAUDE.md, step 7.1, "Name order").
+    """
+    tokens = full_name.split()
+    if len(tokens) <= 1:
+        return full_name
+    surname, *given_names = tokens
+    return " ".join((*given_names, surname))

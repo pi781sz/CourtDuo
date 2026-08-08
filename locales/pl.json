@@ -44,7 +44,7 @@
     "confirm_cancel_button": "Anuluj",
     "send_cancelled": "Zaproszenie nie zostało wysłane.",
     "sent": "Zaproszenie zostało wysłane. Czekaj na odpowiedź.",
-    "status_pending": "🟠 {name} — {tournament}",
+    "status_pending": "⚪ {name} — {tournament}",
     "status_matched": "🟢 Partner: {name} — {tournament}",
     "received": "{name} zaprasza Cię do gry podwójnej.",
     "accept_button": "Zatwierdź",
@@ -66,7 +66,7 @@
       "M": "Odpowiedziałeś, że nie jedziesz na ten turniej.",
       "W": "Odpowiedziałaś, że nie jedziesz na ten turniej."
     },
-    "not_attending_inviter": "⚪ {name} nie jedzie na ten turniej.",
+    "not_attending_inviter": "🟠 {name} nie jedzie na ten turniej.",
     "partner_found_elsewhere": "Ten zawodnik znalazł już partnera.",
     "no_longer_valid": "To zaproszenie jest już nieaktualne.",
     "already_answered": "Na to zaproszenie już odpowiedziano.",
@@ -96,6 +96,7 @@
     "position_unknown": "brak rankingu w bazie"
   },
   "common": {
-    "unknown_club": "brak klubu"
+    "unknown_club": "brak klubu",
+    "find_partner_button": "Znajdź partnera"
   }
 }
