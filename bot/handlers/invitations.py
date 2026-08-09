@@ -65,6 +65,7 @@ from bot.keyboards.invitations import (
     RejectInvitationCallback,
     invitation_answer_keyboard,
 )
+from bot.keyboards.navigation import persistent_menu_keyboard
 from bot.lang import lang_for
 from bot.notifications import push
 from bot.states import InvitationSend, PartnerSelection
@@ -169,7 +170,12 @@ async def _notify_cancelled(
         if account is None:
             continue
         recipient_lang = account.lang or lang
-        await push(bot, account.telegram_id, t("invitation.partner_found_elsewhere", recipient_lang))
+        await push(
+            bot,
+            account.telegram_id,
+            t("invitation.partner_found_elsewhere", recipient_lang),
+            reply_markup=persistent_menu_keyboard(recipient_lang),
+        )
 
 
 # --- Inviter: the confirmation screen ------------------------------------------
@@ -274,7 +280,9 @@ async def handle_accept(
     await _clear_buttons(callback)
     await callback.answer()
     if account is None:
-        await callback.message.answer(t("invitation.no_longer_valid", lang))
+        await callback.message.answer(
+            t("invitation.no_longer_valid", lang), reply_markup=persistent_menu_keyboard(lang)
+        )
         return
 
     result = await accept_invitation(session, callback_data.invitation_id, account.pzt_id, _now())
@@ -292,10 +300,13 @@ async def handle_accept(
                 )
                 _, partner_name = await _participant(session, partner_pzt_id)
                 await callback.message.answer(
-                    t("partner_selection.inviter_already_matched", lang, name=display_name(partner_name))
+                    t("partner_selection.inviter_already_matched", lang, name=display_name(partner_name)),
+                    reply_markup=persistent_menu_keyboard(lang),
                 )
                 return
-        await callback.message.answer(t(_RESPOND_FAILURE_KEYS[result.failure], lang))
+        await callback.message.answer(
+            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=persistent_menu_keyboard(lang)
+        )
         return
 
     invitation = result.invitation
@@ -305,13 +316,14 @@ async def handle_accept(
     matched_pair = (invitation.inviter_pzt_id, invitation.invitee_pzt_id)
     await session.commit()
 
-    await callback.message.answer(matched_text(inviter_name, label, lang))
+    await callback.message.answer(matched_text(inviter_name, label, lang), reply_markup=persistent_menu_keyboard(lang))
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
         await push(
             bot,
             inviter_account.telegram_id,
             accepted_inviter_text(account.full_name, account.gender, label, inviter_lang),
+            reply_markup=persistent_menu_keyboard(inviter_lang),
         )
     await _notify_cancelled(bot, session, result, matched_pair, lang)
 
@@ -339,13 +351,17 @@ async def _handle_simple_answer(
     await _clear_buttons(callback)
     await callback.answer()
     if account is None:
-        await callback.message.answer(t("invitation.no_longer_valid", lang))
+        await callback.message.answer(
+            t("invitation.no_longer_valid", lang), reply_markup=persistent_menu_keyboard(lang)
+        )
         return
 
     result = await answer(session, invitation_id, account.pzt_id, _now())
     if result.failure is not None:
         await session.commit()
-        await callback.message.answer(t(_RESPOND_FAILURE_KEYS[result.failure], lang))
+        await callback.message.answer(
+            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=persistent_menu_keyboard(lang)
+        )
         return
 
     invitation = result.invitation
@@ -354,13 +370,16 @@ async def _handle_simple_answer(
     inviter_account, inviter_name = await _participant(session, invitation.inviter_pzt_id)
     await session.commit()
 
-    await callback.message.answer(invitee_text(inviter_name, account.gender, label, lang))
+    await callback.message.answer(
+        invitee_text(inviter_name, account.gender, label, lang), reply_markup=persistent_menu_keyboard(lang)
+    )
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
         await push(
             bot,
             inviter_account.telegram_id,
             inviter_text(account.full_name, account.gender, label, inviter_lang),
+            reply_markup=persistent_menu_keyboard(inviter_lang),
         )
 
 

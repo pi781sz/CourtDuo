@@ -26,13 +26,16 @@ import logging
 
 from aiogram import Bot
 from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramForbiddenError
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 
 logger = logging.getLogger(__name__)
 
 
 async def push(
-    bot: Bot, telegram_id: int, text: str, reply_markup: InlineKeyboardMarkup | None = None
+    bot: Bot,
+    telegram_id: int,
+    text: str,
+    reply_markup: InlineKeyboardMarkup | ReplyKeyboardMarkup | None = None,
 ) -> bool:
     """Sends `text` to `telegram_id`. Returns True if Telegram accepted it."""
     try:

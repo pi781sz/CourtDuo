@@ -327,6 +327,14 @@ async def test_command_before_registration_does_not_crash(db_session: AsyncSessi
     await handle_moje_deble_command(message, db_session)
 
     assert _texts(message) == ["Zacznij od komendy /start, aby się zarejestrować."]
+    # CLAUDE.md step 8.5: /moje_deble is typeable before /start ever ran,
+    # so this can be a session's very first message -- it must not be the
+    # one place the persistent reply keyboard never shows up.
+    markup = _markups(message)[0]
+    assert markup.is_persistent is True
+    assert markup.resize_keyboard is True
+    rows = [[button.text for button in row] for row in markup.keyboard]
+    assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"]]
 
 
 # --- NEVER: a third party's partner name never appears --------------------------
@@ -385,3 +393,6 @@ async def test_moje_deble_button_press_before_registration_does_not_crash(db_ses
     await handle_moje_deble_button_press(message, db_session)
 
     assert _texts(message) == ["Zacznij od komendy /start, aby się zarejestrować."]
+    markup = _markups(message)[0]
+    assert markup.is_persistent is True
+    assert markup.resize_keyboard is True

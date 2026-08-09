@@ -22,6 +22,7 @@ from datetime import date, datetime, timezone
 from enum import Enum, auto
 from zoneinfo import ZoneInfo
 
+from aiogram import Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy import select
@@ -281,6 +282,7 @@ async def handle_partner_candidate(
     account: Account,
     tournament: Tournament,
     candidate: Player,
+    bot: Bot,
 ) -> None:
     """Runs every remaining pre-invitation check against a resolved
     candidate (whether resolved directly from a single name match or via a
@@ -319,7 +321,7 @@ async def handle_partner_candidate(
         await message.answer(t("partner_selection.cannot_send_invitation", lang))
         return
 
-    await start_invitation_send(message, state, lang, session, account, tournament, candidate)
+    await start_invitation_send(message, state, lang, session, account, tournament, candidate, bot)
 
 
 # --- Entry point -------------------------------------------------------------

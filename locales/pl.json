@@ -120,10 +120,9 @@
     "received_not_attending": "{emoji} {name} — nie jadę"
   },
   "invite_friend": {
-    "message": "Zaproś znajomego do CourtDuo! Wybierz, jak chcesz wysłać zaproszenie.",
-    "share_text": "Cześć! Szukam partnera do debla na turnieje PZT. Dołącz do CourtDuo: {link}",
+    "message": "Zaproś zawodnika, którego znasz do CourtDuo!\nWybierz, jak chcesz wysłać zaproszenie.",
+    "share_text": "Jeśli szukasz partnera do debla na turnieje PZT, wypróbuj CourtDuo na Telegramie. Polecam! {link}",
     "whatsapp_button": "WhatsApp",
-    "telegram_button": "Telegram",
-    "sms_instructions": "Aby wysłać SMS-em, skopiuj poniższy tekst i wklej go w wiadomości:"
+    "telegram_button": "Telegram"
   }
 }

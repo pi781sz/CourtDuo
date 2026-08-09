@@ -111,6 +111,12 @@ def _make_state(telegram_id: int) -> FSMContext:
     return FSMContext(storage=MemoryStorage(), key=key)
 
 
+def _make_bot() -> MagicMock:
+    bot = MagicMock()
+    bot.get_me = AsyncMock(return_value=MagicMock(username="courtduo_test_bot"))
+    return bot
+
+
 # --- find_matching_players ---------------------------------------------------
 
 
@@ -316,7 +322,7 @@ async def test_age_check_fires_before_the_not_on_courtduo_message(db_session: As
     message = _make_message()
     state = _make_state(2107)
 
-    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate, _make_bot())
 
     texts = [call.args[0] for call in message.answer.call_args_list]
     assert any("nie może grać w kategorii U14" in text for text in texts)
@@ -515,7 +521,7 @@ async def test_already_invited_by_candidate_redirects_to_answering_instead_of_a_
     message = _make_message()
     state = _make_state(2001)
 
-    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate, _make_bot())
 
     texts = [call.args[0] for call in message.answer.call_args_list]
     assert any("Ola Testowa" in text for text in texts)
@@ -545,7 +551,7 @@ async def test_all_checks_pass_hands_off_to_the_confirmation_screen(db_session: 
     message = _make_message()
     state = _make_state(2001)
 
-    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate, _make_bot())
 
     data = await state.get_data()
     assert data["partner_pzt_id"] == "INV002"
@@ -576,9 +582,20 @@ async def test_a_named_player_who_does_not_use_courtduo_gets_no_confirmation_scr
     state = _make_state(2001)
     await state.set_state(PartnerSelection.waiting_name)
 
-    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate, _make_bot())
 
     texts = [call.args[0] for call in message.answer.call_args_list]
     assert texts == ["Ola Testowa nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby."]
+    # CLAUDE.md step 8.5, PROBLEM 4: the same WhatsApp/Telegram share
+    # buttons "Zaproś na CourtDuo" offers, so this isn't a dead end.
+    markup = message.answer.call_args.kwargs["reply_markup"]
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert [button.text for button in buttons] == ["WhatsApp", "Telegram"]
+    # The named player's name never goes into the share text/urls -- this
+    # message could end up sent to anyone (CLAUDE.md, non-negotiable rule 2).
+    for button in buttons:
+        assert button.url.startswith("https://")
+        assert "Ola" not in button.url
+        assert "Testowa" not in button.url
     # Still at the name prompt, free to try somebody else.
     assert await state.get_state() == PartnerSelection.waiting_name.state

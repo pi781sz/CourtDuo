@@ -1,7 +1,8 @@
 """The "Zaproś na CourtDuo" persistent-keyboard label (CLAUDE.md step 8.4,
-CHANGE 2): a generic invite, unattached to any tournament or named player
--- that's build order step 9's pending_external_invites flow, and its
-"they joined" callback, neither of which this touches.
+CHANGE 2, dropped down to two share channels by step 8.5): a generic
+invite, unattached to any tournament or named player -- that's build
+order step 9's pending_external_invites flow, and its "they joined"
+callback, neither of which this touches.
 
 No account is required to use it (nothing here needs one beyond the
 interface language), so it works even mid-registration, before the typed
@@ -15,8 +16,6 @@ player's own phone/app when they tap Share.
 """
 
 from __future__ import annotations
-
-import html
 
 from aiogram import Bot, F, Router
 from aiogram.types import Message
@@ -40,13 +39,4 @@ async def handle_invite_friend(message: Message, session: AsyncSession, bot: Bot
     link = share_link(me.username)
     text = share_text(link, lang)
 
-    # Telegram's inline URL buttons reject sms: outright (CLAUDE.md step
-    # 8.4, CHANGE 2) -- so the SMS case is a copyable line in the message
-    # body instead, with <code> for a one-tap long-press copy, rather than
-    # a broken button.
-    body = (
-        f"{t('invite_friend.message', lang)}\n\n"
-        f"{t('invite_friend.sms_instructions', lang)}\n"
-        f"<code>{html.escape(text)}</code>"
-    )
-    await message.answer(body, reply_markup=share_keyboard(link, text, lang))
+    await message.answer(t("invite_friend.message", lang), reply_markup=share_keyboard(link, text, lang))
