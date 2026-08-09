@@ -73,9 +73,31 @@
     "no_longer_valid": "To zaproszenie jest już nieaktualne.",
     "already_answered": "Na to zaproszenie już odpowiedziano.",
     "expired": "To zaproszenie wygasło.",
-    "invitee_not_on_courtduo": "{name} nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby.",
+    "invitee_not_on_courtduo": {
+      "M": "{name} nie używa jeszcze CourtDuo.\nZaproś go poniżej przez wybraną aplikację.",
+      "W": "{name} nie używa jeszcze CourtDuo.\nZaproś ją poniżej przez wybraną aplikację."
+    },
     "delivery_failed": "Nie udało się dostarczyć zaproszenia do {name}. Wpisz imię i nazwisko innej osoby.",
-    "already_invited_by_invitee": "Masz już zaproszenie od {name} na ten turniej. Sprawdź „Moje deble”, aby odpowiedzieć."
+    "already_invited_by_invitee": "Masz już zaproszenie od {name} na ten turniej. Sprawdź „Moje deble”, aby odpowiedzieć.",
+    "cancel_button": "Anuluj zaproszenie",
+    "cancelled_inviter": "Anulowano zaproszenie do {name} — {tournament}.",
+    "cancelled_invitee": {
+      "M": "{name} wycofał zaproszenie — {tournament}.",
+      "W": "{name} wycofała zaproszenie — {tournament}."
+    },
+    "cancel_already_accepted": {
+      "M": "Nie można anulować — {name} już zaakceptował to zaproszenie.",
+      "W": "Nie można anulować — {name} już zaakceptowała to zaproszenie."
+    },
+    "cancel_already_rejected": {
+      "M": "Nie można anulować — {name} już odrzucił to zaproszenie.",
+      "W": "Nie można anulować — {name} już odrzuciła to zaproszenie."
+    },
+    "cancel_already_not_attending": {
+      "M": "Nie można anulować — {name} odpowiedział, że nie jedzie na ten turniej.",
+      "W": "Nie można anulować — {name} odpowiedziała, że nie jedzie na ten turniej."
+    },
+    "cancel_already_cancelled": "To zaproszenie zostało już anulowane."
   },
   "partner_selection": {
     "ask_name": "Wpisz imię i nazwisko osoby, z którą chcesz grać.",

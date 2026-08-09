@@ -74,10 +74,24 @@ _GENDER_BY_LABEL = {g.value: g for g in Gender}
 # Gender enum. This maps one to the other for the eligibility filter in
 # get_eligible_tournaments.
 _GENDER_BY_ACCOUNT_CODE = {"M": Gender.BOYS, "W": Gender.GIRLS}
+_ACCOUNT_CODE_BY_GENDER = {gender: code for code, gender in _GENDER_BY_ACCOUNT_CODE.items()}
 
 
 def gender_for_account_code(code: str) -> Gender:
     return _GENDER_BY_ACCOUNT_CODE[code]
+
+
+def account_code_for_gender(gender: Gender | None) -> str | None:
+    """The inverse of gender_for_account_code, for a `players.gender` value
+    that has no account of its own yet -- CLAUDE.md step 8.6, CHANGE 1: the
+    "does not use CourtDuo" message needs a gendered pronoun (ją/go) for a
+    player who, by definition, has no accounts.gender to read. None passes
+    through unchanged -- bot.invitation_text.gendered() already falls back
+    to the masculine form for an unknown code.
+    """
+    if gender is None:
+        return None
+    return _ACCOUNT_CODE_BY_GENDER[gender]
 
 
 async def upsert_tournament(session: AsyncSession, tournament: ScrapedTournament) -> Tournament | None:

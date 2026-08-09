@@ -24,6 +24,8 @@ import logging
 from bot.formatting import STATUS_EMOJI
 from bot.invitation_text import (
     accepted_inviter_text,
+    cancelled_invitee_text,
+    cancelled_inviter_text,
     confirmation_text,
     gendered,
     invitation_text,
@@ -89,6 +91,18 @@ def test_not_attending_seen_by_inviter_uses_the_same_colour_as_a_refusal():
     assert text == not_attending_inviter_text("Testowa Jagoda", "pl")
 
 
+def test_cancelled_invitee_uses_masculine_verb_for_a_boy_inviter():
+    text = cancelled_invitee_text("Testowy Marek", "M", _LABEL, "pl")
+
+    assert text == f"Marek Testowy wycofał zaproszenie — {_LABEL}."
+
+
+def test_cancelled_invitee_uses_feminine_verb_for_a_girl_inviter():
+    text = cancelled_invitee_text("Testowa Jagoda", "W", _LABEL, "pl")
+
+    assert text == f"Jagoda Testowa wycofała zaproszenie — {_LABEL}."
+
+
 def test_unknown_gender_falls_back_to_masculine_and_logs(caplog):
     with caplog.at_level(logging.WARNING):
         text = gendered("invitation.accepted_inviter", None, "pl", name="Testowy Marek")
@@ -132,6 +146,10 @@ def test_sent_confirmation_shows_the_pending_marker():
 
 def test_matched_line_names_the_partner_and_the_tournament():
     assert matched_text("Testowa Jagoda", _LABEL, "pl") == f"🟢 Partner: Jagoda Testowa — {_LABEL}"
+
+
+def test_cancelled_inviter_names_the_withdrawn_partner_and_the_tournament():
+    assert cancelled_inviter_text("Testowa Jagoda", _LABEL, "pl") == f"Anulowano zaproszenie do Jagoda Testowa — {_LABEL}."
 
 
 # --- CLAUDE.md step 8.3, PROBLEM 2: every colour comes from STATUS_EMOJI ------

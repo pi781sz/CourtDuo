@@ -1,7 +1,8 @@
 """The invitation engine (CLAUDE.md, "Invitation engine"; build order
-step 7): the four transactions an invitation can go through, and nothing
-else. No Telegram, no strings — bot.handlers.invitations does the talking,
-bot.invitation_text does the wording.
+step 7, extended by step 8.6's inviter-initiated cancel): the transactions
+an invitation can go through, and nothing else. No Telegram, no strings —
+bot.handlers.invitations does the talking, bot.invitation_text does the
+wording.
 
     PENDING -> ACCEPTED | REJECTED | NOT_ATTENDING | CANCELLED | EXPIRED
 
@@ -359,3 +360,79 @@ async def not_attending_invitation(
     return await _answer_without_matching(
         session, invitation_id, responder_pzt_id, now, InvitationState.NOT_ATTENDING
     )
+
+
+# --- Cancelling (CLAUDE.md step 8.6) -------------------------------------------
+
+
+class CancelFailure(Enum):
+    """Every way a cancel can fail. Unlike RespondFailure, a terminal state
+    other than PENDING is split out per actual answer rather than collapsed
+    into one ALREADY_ANSWERED — CLAUDE.md step 8.6 asks the inviter to be
+    told *what* the answer was, not just that there was one."""
+
+    NOT_FOUND = auto()
+    # The tapper is not this invitation's inviter -- callback payloads are
+    # client-supplied, so this is an authorization check, same as
+    # RespondFailure.NOT_YOURS on the answering side.
+    NOT_YOURS = auto()
+    ALREADY_ACCEPTED = auto()
+    ALREADY_REJECTED = auto()
+    ALREADY_NOT_ATTENDING = auto()
+    ALREADY_CANCELLED = auto()
+    EXPIRED = auto()
+
+
+@dataclass
+class CancelResult:
+    failure: CancelFailure | None = None
+    invitation: Invitation | None = None
+
+
+def _cancel_terminal_failure(state: InvitationState) -> CancelFailure:
+    if state is InvitationState.ACCEPTED:
+        return CancelFailure.ALREADY_ACCEPTED
+    if state is InvitationState.REJECTED:
+        return CancelFailure.ALREADY_REJECTED
+    if state is InvitationState.NOT_ATTENDING:
+        return CancelFailure.ALREADY_NOT_ATTENDING
+    if state is InvitationState.EXPIRED:
+        return CancelFailure.EXPIRED
+    return CancelFailure.ALREADY_CANCELLED
+
+
+async def cancel_invitation(
+    session: AsyncSession, invitation_id: int, inviter_pzt_id: str, now: datetime
+) -> CancelResult:
+    """Withdraws a still-PENDING invitation at its sender's request
+    (CLAUDE.md step 8.6). Same shape as _answer_without_matching — a
+    single-row lock re-verifies the invitation is still PENDING before
+    writing, since the invitee may have answered it a moment before this
+    transaction started. A confirmed match is never reachable here: once a
+    row is ACCEPTED, this returns ALREADY_ACCEPTED and touches nothing.
+
+    A cancelled invitation frees the slot it held (CLAUDE.md, "what a
+    cancelled invitation frees up"): db.crud.count_pending_outgoing_invitations
+    only counts PENDING rows, and db.crud.get_answered_invitation only
+    matches REJECTED/NOT_ATTENDING, so nothing further is needed here for
+    either the pending-count limit or the re-invite block to reflect a
+    cancel immediately -- CANCELLED simply isn't in either query's set.
+    """
+    invitation = await crud.get_invitation_by_id(session, invitation_id)
+    if invitation is None:
+        return CancelResult(failure=CancelFailure.NOT_FOUND)
+    if invitation.inviter_pzt_id != inviter_pzt_id:
+        return CancelResult(failure=CancelFailure.NOT_YOURS)
+
+    current = await crud.lock_invitation(session, invitation_id)
+    if current is None:
+        return CancelResult(failure=CancelFailure.NOT_FOUND)
+    if current.state is not InvitationState.PENDING:
+        return CancelResult(failure=_cancel_terminal_failure(current.state), invitation=current)
+    if _expire_if_due(current, now):
+        return CancelResult(failure=CancelFailure.EXPIRED, invitation=current)
+
+    current.state = InvitationState.CANCELLED
+    await session.flush()
+    logger.info("Invitation %s cancelled by its inviter", current.id)
+    return CancelResult(invitation=current)

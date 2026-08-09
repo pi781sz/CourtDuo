@@ -250,3 +250,15 @@ def pending_received_entries(groups: list[TournamentGroup]) -> list[DebelEntry]:
         for entry in group.entries
         if entry.state is InvitationState.PENDING and entry.direction is Direction.RECEIVED
     ]
+
+
+def pending_sent_entries(groups: list[TournamentGroup]) -> list[DebelEntry]:
+    """Every still-open sent invitation across all groups, in render order
+    -- what the "Anuluj zaproszenie" button attaches to (CLAUDE.md step
+    8.6: only the sender may withdraw it, so only these get one)."""
+    return [
+        entry
+        for group in groups
+        for entry in group.entries
+        if entry.state is InvitationState.PENDING and entry.direction is Direction.SENT
+    ]

@@ -11,6 +11,7 @@ knowing nothing. Invented names, telegram ids and pzt_ids only.
 
 from __future__ import annotations
 
+import itertools
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.invitations import (
     handle_accept,
+    handle_cancel,
     handle_confirm_send,
     handle_not_attending,
     handle_reject,
@@ -29,6 +31,7 @@ from bot.handlers.invitations import (
 from bot.invitation_engine import send_invitation
 from bot.keyboards.invitations import (
     AcceptInvitationCallback,
+    CancelInvitationCallback,
     NotAttendingCallback,
     RejectInvitationCallback,
 )
@@ -105,16 +108,21 @@ def _make_callback(telegram_id: int) -> MagicMock:
 def _make_bot(fail_for: set[int] | None = None) -> MagicMock:
     """A bot whose send_message records every push, and refuses the chats
     in `fail_for` exactly as Telegram does for a player who blocked the
-    bot."""
+    bot. Each accepted push gets its own incrementing message_id, the same
+    shape a real Telegram Message carries -- CLAUDE.md step 8.6 stores it
+    on the invitation (invitations.invitee_message_id) so a later cancel
+    can find the message again."""
     blocked = fail_for or set()
     bot = MagicMock()
+    message_ids = itertools.count(1)
 
     async def send_message(chat_id, text, reply_markup=None):
         if chat_id in blocked:
             raise TelegramForbiddenError(method=MagicMock(), message="bot was blocked by the user")
-        return MagicMock()
+        return MagicMock(message_id=next(message_ids))
 
     bot.send_message = AsyncMock(side_effect=send_message)
+    bot.edit_message_reply_markup = AsyncMock()
     return bot
 
 
@@ -414,3 +422,120 @@ async def test_answering_an_already_cancelled_invitation_says_so_without_changin
     assert _answers(callback) == ["Ten zawodnik znalazł już partnera."]
     assert _is_persistent_menu(_answer_markups(callback)[0])
     assert (await crud.get_invitation_by_id(db_session, to_ola.id)).state is InvitationState.CANCELLED
+
+
+# --- cancelling (CLAUDE.md step 8.6) ---------------------------------------------
+
+
+async def test_cancel_notifies_the_invitee_and_clears_their_original_buttons(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "CNH001", "Testowa Anna", 8100)
+    await _add_user(db_session, "CNH002", "Testowa Jagoda", 8101)
+    bot = _make_bot()
+    await handle_confirm_send(_make_callback(8100), await _state_for(8100, _GUID, "CNH002"), db_session, bot)
+    invitation = await crud.get_pending_invitation(db_session, "CNH001", "CNH002", _GUID)
+    assert invitation.invitee_message_id is not None
+
+    cancel_callback = _make_callback(8100)
+    await handle_cancel(cancel_callback, CancelInvitationCallback(invitation_id=invitation.id), db_session, bot)
+
+    # The inviter's own confirmation, naming the person and the tournament.
+    assert _answers(cancel_callback) == [f"Anulowano zaproszenie do Jagoda Testowa — {_LABEL}."]
+    assert _is_persistent_menu(_answer_markups(cancel_callback)[0])
+    # The invitee is told, feminine verb for Anna (a girl).
+    assert _pushes(bot)[8101][-1] == f"Anna Testowa wycofała zaproszenie — {_LABEL}."
+    assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.CANCELLED
+    # The invitee's original invitation message loses its answer buttons.
+    bot.edit_message_reply_markup.assert_awaited_once_with(
+        chat_id=8101, message_id=invitation.invitee_message_id, reply_markup=None
+    )
+
+
+async def test_cancel_uses_masculine_verb_for_a_boy_inviter(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    db_session.add(
+        Event(
+            tournament_guid=_GUID,
+            category_label="Kategoria testowa chłopcy",
+            gender=Gender.BOYS,
+            play_type=PlayType.DOUBLES,
+            draw_format=None,
+            is_doubles=True,
+        )
+    )
+    await db_session.flush()
+    await _add_user(db_session, "CNH010", "Testowy Adam", 8110, gender=Gender.BOYS)
+    await _add_user(db_session, "CNH011", "Testowy Marek", 8111, gender=Gender.BOYS)
+    bot = _make_bot()
+    await handle_confirm_send(_make_callback(8110), await _state_for(8110, _GUID, "CNH011"), db_session, bot)
+    invitation = await crud.get_pending_invitation(db_session, "CNH010", "CNH011", _GUID)
+
+    await handle_cancel(
+        _make_callback(8110), CancelInvitationCallback(invitation_id=invitation.id), db_session, bot
+    )
+
+    assert _pushes(bot)[8111][-1] == f"Adam Testowy wycofał zaproszenie — {_LABEL}."
+
+
+async def test_only_the_sender_may_cancel(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "CNH020", "Testowa Anna", 8120)
+    await _add_user(db_session, "CNH021", "Testowa Jagoda", 8121)
+    tournament = await crud.get_tournament_by_guid(db_session, _GUID)
+    anna = await crud.get_account_by_pzt_id(db_session, "CNH020")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await crud.get_player_by_pzt_id(db_session, "CNH021"), _NOW)
+    ).invitation
+
+    # The invitee taps a spoofed cancel callback for an invitation that
+    # isn't theirs to withdraw.
+    callback = _make_callback(8121)
+    await handle_cancel(callback, CancelInvitationCallback(invitation_id=invitation.id), db_session, _make_bot())
+
+    assert _answers(callback) == ["To zaproszenie jest już nieaktualne."]
+    assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.PENDING
+
+
+async def test_cancelling_an_already_accepted_invitation_fails_and_reports_the_real_outcome(
+    db_session: AsyncSession,
+):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "CNH030", "Testowa Anna", 8130)
+    await _add_user(db_session, "CNH031", "Testowa Jagoda", 8131)
+    tournament = await crud.get_tournament_by_guid(db_session, _GUID)
+    anna = await crud.get_account_by_pzt_id(db_session, "CNH030")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await crud.get_player_by_pzt_id(db_session, "CNH031"), _NOW)
+    ).invitation
+    # Jagoda accepts a moment before Anna's cancel tap lands.
+    await handle_accept(_make_callback(8131), AcceptInvitationCallback(invitation_id=invitation.id), db_session, _make_bot())
+
+    cancel_callback = _make_callback(8130)
+    await handle_cancel(
+        cancel_callback, CancelInvitationCallback(invitation_id=invitation.id), db_session, _make_bot()
+    )
+
+    assert _answers(cancel_callback) == [
+        "Nie można anulować — Jagoda Testowa już zaakceptowała to zaproszenie."
+    ]
+    # A confirmed match is locked (CLAUDE.md) -- cancel must not touch it.
+    assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.ACCEPTED
+
+
+async def test_after_cancelling_the_inviter_may_re_invite_the_same_person(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "CNH040", "Testowa Anna", 8140)
+    await _add_user(db_session, "CNH041", "Testowa Jagoda", 8141)
+    tournament = await crud.get_tournament_by_guid(db_session, _GUID)
+    anna = await crud.get_account_by_pzt_id(db_session, "CNH040")
+    jagoda_player = await crud.get_player_by_pzt_id(db_session, "CNH041")
+    invitation = (await send_invitation(db_session, anna, tournament, jagoda_player, _NOW)).invitation
+
+    await handle_cancel(
+        _make_callback(8140), CancelInvitationCallback(invitation_id=invitation.id), db_session, _make_bot()
+    )
+
+    # Below the 3-pending limit again, and free to re-invite the same person.
+    assert await crud.count_pending_outgoing_invitations(db_session, "CNH040", _GUID) == 0
+    again = await send_invitation(db_session, anna, tournament, jagoda_player, _NOW)
+    assert again.failure is None

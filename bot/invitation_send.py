@@ -23,8 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.i18n import t
-from bot.invitation_text import confirmation_text
+from bot.invitation_text import confirmation_text, gendered
 from bot.invite_friend import share_link, share_text
 from bot.keyboards.invitations import confirm_send_keyboard
 from bot.keyboards.invite_friend import share_keyboard
@@ -33,6 +32,31 @@ from bot.tournament_search import label_for_tournament
 from core.text import display_name
 from db import crud
 from db.models import Account, Player, Tournament
+
+
+async def send_not_on_courtduo_response(message: Message, invitee: Player, lang: str, bot: Bot) -> None:
+    """CLAUDE.md step 8.5 PROBLEM 4, reworded by step 8.6 CHANGE 1: the
+    named player is on PZT's roster but has no CourtDuo account, so there
+    is nowhere to deliver a real invitation. The share buttons sit right
+    below the message, so it now points at them ("Zaproś {ją,go} poniżej")
+    instead of asking for another name -- gendered on the named player's
+    own gender (players.gender), the only gender CourtDuo has for someone
+    with no account of their own. The named player's name never goes into
+    the share text/link itself (CLAUDE.md, non-negotiable rule 2): this
+    message might end up sent to anyone.
+    """
+    me = await bot.get_me()
+    link = share_link(me.username)
+    text = share_text(link, lang)
+    await message.answer(
+        gendered(
+            "invitation.invitee_not_on_courtduo",
+            crud.account_code_for_gender(invitee.gender),
+            lang,
+            name=display_name(invitee.full_name),
+        ),
+        reply_markup=share_keyboard(link, text, lang),
+    )
 
 
 async def start_invitation_send(
@@ -52,21 +76,8 @@ async def start_invitation_send(
         # (a stored pending_external_invite and the "they joined" callback)
         # is build order step 9; until then, say so and let them type
         # another name rather than show a confirmation screen that cannot
-        # lead anywhere. CLAUDE.md step 8.5, PROBLEM 4: that dead end is
-        # softened with the same WhatsApp/Telegram share buttons
-        # "Zaproś na CourtDuo" offers -- the named player's name never goes
-        # into the share text itself (CLAUDE.md, non-negotiable rule 2:
-        # this message might be sent to anyone, and the bot must not be the
-        # one revealing who it was really meant for). The player stays in
-        # PartnerSelection.waiting_name. Mid-flow (CLAUDE.md step 8.2): the
-        # message itself says to type another name.
-        me = await bot.get_me()
-        link = share_link(me.username)
-        text = share_text(link, lang)
-        await message.answer(
-            t("invitation.invitee_not_on_courtduo", lang, name=display_name(invitee.full_name)),
-            reply_markup=share_keyboard(link, text, lang),
-        )
+        # lead anywhere. The player stays in PartnerSelection.waiting_name.
+        await send_not_on_courtduo_response(message, invitee, lang, bot)
         return
 
     await state.update_data(partner_pzt_id=invitee.pzt_id)

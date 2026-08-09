@@ -39,16 +39,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.handlers.tournament_search import start_tournament_search
 from bot.i18n import t
 from bot.invitation_engine import (
+    CancelFailure,
     RespondFailure,
     RespondResult,
     SendFailure,
     accept_invitation,
+    cancel_invitation,
     not_attending_invitation,
     reject_invitation,
     send_invitation,
 )
+from bot.invitation_send import send_not_on_courtduo_response
 from bot.invitation_text import (
     accepted_inviter_text,
+    cancelled_invitee_text,
+    cancelled_inviter_text,
+    gendered,
     invitation_text,
     matched_text,
     not_attending_invitee_text,
@@ -59,6 +65,7 @@ from bot.invitation_text import (
 )
 from bot.keyboards.invitations import (
     AcceptInvitationCallback,
+    CancelInvitationCallback,
     CancelSendCallback,
     ConfirmSendCallback,
     NotAttendingCallback,
@@ -81,9 +88,13 @@ router = Router(name="invitations")
 # Every send failure reuses the step-6 wording where the situation is the
 # same one — a player should not get two different sentences for "this
 # person already has a partner" depending on which check caught it.
+# SendFailure.INVITEE_NOT_ON_COURTDUO is deliberately absent: it needs the
+# named player's gender and the share-button keyboard, not a plain t()
+# lookup, so handle_confirm_send special-cases it via
+# bot.invitation_send.send_not_on_courtduo_response instead (CLAUDE.md step
+# 8.6, CHANGE 1).
 _SEND_FAILURE_KEYS: dict[SendFailure, str] = {
     SendFailure.NOT_ENTITLED: "partner_selection.cannot_send_invitation",
-    SendFailure.INVITEE_NOT_ON_COURTDUO: "invitation.invitee_not_on_courtduo",
     SendFailure.SELF_INVITE: "partner_selection.self_invite",
     SendFailure.GENDER_MISMATCH: "partner_selection.gender_mismatch",
     SendFailure.INVITER_ALREADY_MATCHED: "partner_selection.inviter_already_matched",
@@ -113,6 +124,26 @@ _RESPOND_FAILURE_KEYS: dict[RespondFailure, str] = {
     RespondFailure.ALREADY_ANSWERED: "invitation.already_answered",
     RespondFailure.CANCELLED_BY_MATCH: "invitation.partner_found_elsewhere",
     RespondFailure.EXPIRED: "invitation.expired",
+}
+
+# CLAUDE.md step 8.6: "if it has been answered in the meantime, tell the
+# inviter what the answer was instead of cancelling." Flat, non-gendered
+# outcomes -- an authorization/staleness failure gets the same neutral
+# wording the answer side uses for the same shape of problem.
+_CANCEL_FAILURE_KEYS: dict[CancelFailure, str] = {
+    CancelFailure.NOT_FOUND: "invitation.no_longer_valid",
+    CancelFailure.NOT_YOURS: "invitation.no_longer_valid",
+    CancelFailure.EXPIRED: "invitation.expired",
+    CancelFailure.ALREADY_CANCELLED: "invitation.cancel_already_cancelled",
+}
+
+# The other three CancelFailures name the invitee, so they're gendered on
+# the invitee's own account.gender (every invitee has an account -- an
+# invitation can't exist otherwise, see SendFailure.INVITEE_NOT_ON_COURTDUO).
+_CANCEL_GENDERED_FAILURE_KEYS: dict[CancelFailure, str] = {
+    CancelFailure.ALREADY_ACCEPTED: "invitation.cancel_already_accepted",
+    CancelFailure.ALREADY_REJECTED: "invitation.cancel_already_rejected",
+    CancelFailure.ALREADY_NOT_ATTENDING: "invitation.cancel_already_not_attending",
 }
 
 
@@ -210,6 +241,14 @@ async def handle_confirm_send(
     result = await send_invitation(session, account, tournament, invitee, _now())
 
     if result.failure is not None:
+        if result.failure is SendFailure.INVITEE_NOT_ON_COURTDUO:
+            # Re-checked here for defense in depth (bot.invitation_send
+            # already refuses to show the confirmation screen for this
+            # case), but reached the same way if it ever is: gendered
+            # wording and the share buttons, not a plain t() lookup.
+            await send_not_on_courtduo_response(callback.message, invitee, lang, bot)
+            await state.set_state(PartnerSelection.waiting_name)
+            return
         name = invitee.full_name
         if result.inviter_partner_pzt_id is not None:
             _, name = await _participant(session, result.inviter_partner_pzt_id)
@@ -244,6 +283,11 @@ async def handle_confirm_send(
         await callback.message.answer(t("invitation.delivery_failed", lang, name=display_name(invitee.full_name)))
         await state.set_state(PartnerSelection.waiting_name)
         return
+
+    # CLAUDE.md step 8.6: remembered so a later cancel can best-effort strip
+    # this exact message's answer buttons (bot.invitation_engine.cancel_invitation).
+    invitation.invitee_message_id = delivered
+    await session.commit()
 
     await callback.message.answer(sent_text(invitee.full_name, label, lang))
     # CLAUDE.md allows up to three pending invitations per tournament, and
@@ -418,3 +462,79 @@ async def handle_not_attending(
         lambda _name, gender, _label, lang: not_attending_invitee_text(gender, lang),
         lambda name, _gender, _label, lang: not_attending_inviter_text(name, lang),
     )
+
+
+# --- Inviter: withdrawing a still-PENDING invitation (CLAUDE.md step 8.6) ------
+
+
+@router.callback_query(CancelInvitationCallback.filter())
+async def handle_cancel(
+    callback: CallbackQuery, callback_data: CancelInvitationCallback, session: AsyncSession, bot: Bot
+) -> None:
+    """Only the sender may withdraw an invitation, and only while it is
+    still PENDING (CLAUDE.md step 8.6) — bot.invitation_engine.cancel_invitation
+    re-verifies both inside its own lock, since the invitee may have
+    answered a moment before this transaction started. A confirmed match is
+    never reachable from here: cancel_invitation refuses to touch an
+    ACCEPTED row and reports that instead.
+    """
+    account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
+    lang = lang_for(account)
+    await _clear_buttons(callback)
+    await callback.answer()
+    if account is None:
+        await callback.message.answer(
+            t("invitation.no_longer_valid", lang), reply_markup=persistent_menu_keyboard(lang)
+        )
+        return
+
+    result = await cancel_invitation(session, callback_data.invitation_id, account.pzt_id, _now())
+
+    if result.failure is not None:
+        await session.commit()
+        if result.failure in _CANCEL_GENDERED_FAILURE_KEYS and result.invitation is not None:
+            invitee_account, invitee_name = await _participant(session, result.invitation.invitee_pzt_id)
+            invitee_gender = invitee_account.gender if invitee_account is not None else None
+            await callback.message.answer(
+                gendered(
+                    _CANCEL_GENDERED_FAILURE_KEYS[result.failure], invitee_gender, lang, name=display_name(invitee_name)
+                ),
+                reply_markup=persistent_menu_keyboard(lang),
+            )
+            return
+        await callback.message.answer(
+            t(_CANCEL_FAILURE_KEYS[result.failure], lang), reply_markup=persistent_menu_keyboard(lang)
+        )
+        return
+
+    invitation = result.invitation
+    tournament = await crud.get_tournament_by_guid(session, invitation.tournament_guid)
+    label = label_for_tournament(tournament)
+    invitee_account, invitee_name = await _participant(session, invitation.invitee_pzt_id)
+    invitee_message_id = invitation.invitee_message_id
+    await session.commit()
+
+    await callback.message.answer(
+        cancelled_inviter_text(invitee_name, label, lang), reply_markup=persistent_menu_keyboard(lang)
+    )
+
+    if invitee_account is not None:
+        invitee_lang = invitee_account.lang or lang
+        await push(
+            bot,
+            invitee_account.telegram_id,
+            cancelled_invitee_text(account.full_name, account.gender, label, invitee_lang),
+            reply_markup=persistent_menu_keyboard(invitee_lang),
+        )
+        if invitee_message_id is not None:
+            # Best-effort: strips the three answer buttons off the
+            # invitee's original notification so a cancelled invitation
+            # can't still be tapped from the screen it first arrived on.
+            # The transaction re-check above is what actually prevents an
+            # answer -- this is cosmetic, so an old/gone message is ignored.
+            try:
+                await bot.edit_message_reply_markup(
+                    chat_id=invitee_account.telegram_id, message_id=invitee_message_id, reply_markup=None
+                )
+            except TelegramAPIError as exc:
+                logger.info("Could not clear cancelled invitation's original buttons: %s", exc)

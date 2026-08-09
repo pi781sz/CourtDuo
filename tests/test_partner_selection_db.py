@@ -585,7 +585,9 @@ async def test_a_named_player_who_does_not_use_courtduo_gets_no_confirmation_scr
     await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate, _make_bot())
 
     texts = [call.args[0] for call in message.answer.call_args_list]
-    assert texts == ["Ola Testowa nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby."]
+    # CLAUDE.md step 8.6, CHANGE 1: points at the share buttons below it
+    # rather than asking for another name -- "ją" for a girl.
+    assert texts == ["Ola Testowa nie używa jeszcze CourtDuo.\nZaproś ją poniżej przez wybraną aplikację."]
     # CLAUDE.md step 8.5, PROBLEM 4: the same WhatsApp/Telegram share
     # buttons "Zaproś na CourtDuo" offers, so this isn't a dead end.
     markup = message.answer.call_args.kwargs["reply_markup"]
@@ -599,3 +601,25 @@ async def test_a_named_player_who_does_not_use_courtduo_gets_no_confirmation_scr
         assert "Testowa" not in button.url
     # Still at the name prompt, free to try somebody else.
     assert await state.get_state() == PartnerSelection.waiting_name.state
+
+
+async def test_a_named_boy_who_does_not_use_courtduo_gets_the_masculine_pronoun(db_session: AsyncSession):
+    tournament = _tournament()
+    db_session.add(tournament)
+    await db_session.flush()
+    await _add_event(db_session, tournament.guid, Gender.BOYS)
+    await _add_player(db_session, "INV003", "Testowy Adam", gender=Gender.BOYS)
+    await _add_account(db_session, 2003, "INV003", "Testowy Adam", "M")
+    await _add_player(db_session, "INV004", "Testowy Marek", gender=Gender.BOYS)
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "INV003")
+    candidate = await crud.get_player_by_pzt_id(db_session, "INV004")
+    message = _make_message()
+    state = _make_state(2003)
+    await state.set_state(PartnerSelection.waiting_name)
+
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate, _make_bot())
+
+    texts = [call.args[0] for call in message.answer.call_args_list]
+    assert texts == ["Marek Testowy nie używa jeszcze CourtDuo.\nZaproś go poniżej przez wybraną aplikację."]

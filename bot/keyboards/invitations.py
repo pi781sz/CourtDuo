@@ -48,6 +48,10 @@ class NotAttendingCallback(CallbackData, prefix="inat"):
     invitation_id: int
 
 
+class CancelInvitationCallback(CallbackData, prefix="iwdrw"):
+    invitation_id: int
+
+
 def confirm_send_keyboard(lang: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=t("invitation.confirm_send_button", lang), callback_data=ConfirmSendCallback())
@@ -74,6 +78,19 @@ def invitation_answer_keyboard(invitation_id: int, lang: str) -> InlineKeyboardM
     builder.button(
         text=t("invitation.not_attending_button", lang),
         callback_data=NotAttendingCallback(invitation_id=invitation_id),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def cancel_invitation_keyboard(invitation_id: int, lang: str) -> InlineKeyboardMarkup:
+    """CLAUDE.md step 8.6: one button, on the inviter's own still-PENDING
+    sent invitation in Moje deble -- the invitee gets invitation_answer_keyboard
+    instead, never this one (they answer, they don't cancel)."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=t("invitation.cancel_button", lang),
+        callback_data=CancelInvitationCallback(invitation_id=invitation_id),
     )
     builder.adjust(1)
     return builder.as_markup()
