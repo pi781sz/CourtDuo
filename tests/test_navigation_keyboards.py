@@ -12,6 +12,7 @@ from bot.keyboards.navigation import (
     find_partner_keyboard,
     invitation_sent_keyboard,
     persistent_menu_keyboard,
+    viewer_menu_keyboard,
 )
 
 
@@ -50,6 +51,17 @@ def test_invitation_sent_keyboard_has_one_moje_deble_button():
     assert len(buttons) == 1
     assert buttons[0].text == "Moje deble"
     assert buttons[0].callback_data == MojeDebleCallback().pack()
+
+
+def test_viewer_menu_keyboard_has_only_moje_deble_no_find_partner_no_invite():
+    # CLAUDE.md step 10.1: a viewer-only Telegram account must never see
+    # Znajdź partnera or Zaproś na CourtDuo -- neither flow it can complete.
+    markup = viewer_menu_keyboard("pl")
+
+    rows = [[button.text for button in row] for row in markup.keyboard]
+    assert rows == [["Moje deble"]]
+    assert markup.resize_keyboard is True
+    assert markup.is_persistent is True
 
 
 def test_find_partner_keyboard_and_moje_deble_callback_prefixes_unchanged():

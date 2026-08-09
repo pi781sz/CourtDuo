@@ -9,12 +9,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import parse_qs, urlparse
 
 from aiogram.filters import CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.moje_deble import handle_moje_deble_button_press, handle_moje_deble_command
@@ -122,7 +123,15 @@ async def test_create_invite_is_refused_for_a_non_allowlisted_account_even_by_di
 # --- create / revoke round trip --------------------------------------------------
 
 
-async def test_create_invite_returns_a_deep_link_and_the_player_is_notified_on_bind(
+def _extract_link(button) -> str:
+    """WhatsApp's button URL-encodes the whole share text (which embeds
+    the link); Telegram's carries the link directly as its own `url`
+    query param -- see bot.invite_friend, reused unchanged by the viewer
+    share flow (CLAUDE.md step 10.1, PROBLEM 3)."""
+    return parse_qs(urlparse(button.url).query)["url"][0]
+
+
+async def test_create_invite_shares_the_link_via_whatsapp_and_telegram_not_shown_as_text(
     db_session: AsyncSession, monkeypatch
 ):
     monkeypatch.setenv("VIEWER_ALLOWLIST_PZT_IDS", "VHD0005")
@@ -134,23 +143,41 @@ async def test_create_invite_returns_a_deep_link_and_the_player_is_notified_on_b
 
     callback.message.answer.assert_awaited_once()
     text, kwargs = callback.message.answer.call_args.args[0], callback.message.answer.call_args.kwargs
-    assert "https://t.me/courtduo_test_bot?start=" in text
+    # CLAUDE.md step 10.1, PROBLEM 3: "share the link instead of showing
+    # it" -- the message text carries no raw link and no player name, only
+    # the buttons do (a share message may be forwarded to anyone).
+    assert "https://t.me/" not in text
+    assert "Adam" not in text
+    assert "Wyślij link z dostępem przez" in text
+
     markup = kwargs["reply_markup"]
     assert isinstance(markup, InlineKeyboardMarkup)
     buttons = [button for row in markup.inline_keyboard for button in row]
-    assert [button.text for button in buttons] == ["Telegram"]
+    assert [button.text for button in buttons] == ["WhatsApp", "Telegram"]
 
-    token = text.split("start=")[1]
+    telegram_link = _extract_link(buttons[1])
+    assert telegram_link.startswith("https://t.me/courtduo_test_bot?start=")
+    assert "Adam" not in buttons[0].url  # the WhatsApp share text either
+
+    token = telegram_link.split("start=")[1]
     viewer_message = _make_message(710005)
     state = FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=710005, user_id=710005))
     await handle_start(viewer_message, state, db_session, bot, CommandObject(args=token))
 
-    # CLAUDE.md step 10: "The player is notified when a viewer is added."
+    # CLAUDE.md step 10.1, PROBLEM 4: the grant notification's new wording.
     bot.send_message.assert_awaited_once()
     push_call = bot.send_message.await_args
     assert push_call.args[0] == 700005
-    assert "Rodzic Testowy" in push_call.args[1]
+    assert push_call.args[1] == "Rodzic Testowy ma teraz dostęp do podglądu Twojego konta CourtDuo."
     assert await crud.count_active_viewers(db_session, (await crud.get_account_by_pzt_id(db_session, "VHD0005")).id) == 1
+
+    # CLAUDE.md step 10.1, PROBLEM 1: the freshly-bound viewer (no player
+    # account of their own) gets the viewer-only keyboard, not the full one.
+    viewer_message.answer.assert_awaited()
+    bind_markup = viewer_message.answer.call_args_list[0].kwargs["reply_markup"]
+    assert isinstance(bind_markup, ReplyKeyboardMarkup)
+    rows = [[button.text for button in row] for row in bind_markup.keyboard]
+    assert rows == [["Moje deble"]]
 
 
 async def test_create_invite_is_refused_at_the_three_viewer_cap(db_session: AsyncSession, monkeypatch):
@@ -194,8 +221,13 @@ async def test_a_pure_viewer_gets_the_read_only_moje_deble_via_the_command(db_se
     message.answer.assert_awaited_once()
     call = message.answer.call_args
     assert "Podgląd: Jagoda Szewczyk" in call.args[0]
-    # No action buttons anywhere on the read-only screen.
-    assert call.kwargs.get("reply_markup") is None
+    # No inline action buttons on the read-only screen itself -- but
+    # (CLAUDE.md step 10.1, PROBLEM 1) a pure viewer's persistent reply
+    # keyboard must be the viewer-only one, never the full player one.
+    markup = call.kwargs.get("reply_markup")
+    assert isinstance(markup, ReplyKeyboardMarkup)
+    rows = [[button.text for button in row] for row in markup.keyboard]
+    assert rows == [["Moje deble"]]
 
 
 async def test_read_only_moje_deble_via_the_keyboard_label_press_too(db_session: AsyncSession):
@@ -254,6 +286,11 @@ async def test_a_viewer_watching_two_players_gets_a_chooser(db_session: AsyncSes
 
     callback.message.answer.assert_awaited_once()
     assert "Podgląd: Ola Nowak" in callback.message.answer.call_args.args[0]
+    # CLAUDE.md step 10.1, PROBLEM 1: 740004 has no CourtDuo account of its
+    # own -- the viewer-only keyboard, not the full one.
+    markup = callback.message.answer.call_args.kwargs["reply_markup"]
+    assert isinstance(markup, ReplyKeyboardMarkup)
+    assert [[button.text for button in row] for row in markup.keyboard] == [["Moje deble"]]
 
 
 async def test_choose_account_callback_refuses_an_account_the_tapper_does_not_watch(db_session: AsyncSession):
@@ -282,3 +319,25 @@ async def test_a_viewer_who_is_also_a_registered_player_gets_their_own_moje_debl
     text = message.answer.call_args.args[0]
     assert "Podgląd" not in text
     assert text == "Nie masz jeszcze żadnych zaproszeń."
+
+
+async def test_a_registered_player_viewer_keeps_their_own_keyboard_while_watching_someone_else(
+    db_session: AsyncSession,
+):
+    # CLAUDE.md step 10.1: "the only thing offered is the read-only view
+    # and a way back to their own account" -- for a registered player,
+    # that "way back" is simply never touching their own already-full
+    # keyboard in the first place (bot.handlers.moje_deble routes them
+    # back to their own account first, regardless of the viewer role).
+    own = await _add_account(db_session, "VHD0017", 700017, full_name="Testowy Widz")
+    watched = await _add_account(db_session, "VHD0018", 700018, full_name="Kowalski Jan")
+    await crud.add_viewer(db_session, watched.id, own.telegram_id)
+
+    callback = _make_callback(own.telegram_id)
+    await handle_viewer_choose_account(
+        callback, ViewerChooseAccountCallback(account_id=watched.id), db_session
+    )
+
+    callback.message.answer.assert_awaited_once()
+    assert "Podgląd: Jan Kowalski" in callback.message.answer.call_args.args[0]
+    assert callback.message.answer.call_args.kwargs.get("reply_markup") is None
