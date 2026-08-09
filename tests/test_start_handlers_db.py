@@ -37,6 +37,12 @@ def _make_state() -> FSMContext:
     return FSMContext(storage=MemoryStorage(), key=key)
 
 
+def _make_bot() -> MagicMock:
+    bot = MagicMock()
+    bot.get_me = AsyncMock(return_value=MagicMock(username="courtduo_test_bot"))
+    return bot
+
+
 def _reply_keyboard_calls(message: MagicMock) -> list[ReplyKeyboardMarkup]:
     return [
         call.kwargs["reply_markup"]
@@ -94,7 +100,7 @@ async def test_completing_registration_also_attaches_the_persistent_keyboard(db_
     state = _make_state()
     await state.set_state(Registration.waiting_pzt_id)
 
-    await handle_pzt_id(message, state, db_session)
+    await handle_pzt_id(message, state, db_session, _make_bot())
 
     markups = _reply_keyboard_calls(message)
     assert len(markups) == 1

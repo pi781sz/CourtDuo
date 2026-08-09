@@ -1,6 +1,6 @@
 """Generic "invite a friend to CourtDuo" share text and link (CLAUDE.md
 step 8.4, CHANGE 2). Unattached to any tournament or named player -- that
-is build order step 9's pending_external_invites flow, not this one.
+is bot.pending_external_invites' territory, not this one.
 
 Pure text/link building only, no Telegram or DB -- bot.handlers.invite_friend
 is the glue that fetches the bot's own username via get_me() and sends the

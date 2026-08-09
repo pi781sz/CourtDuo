@@ -26,6 +26,7 @@ from bot.handlers import (
     moje_deble_router,
     navigation_router,
     partner_selection_router,
+    pending_external_invites_router,
     start_router,
     tournament_search_router,
 )
@@ -62,6 +63,7 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     dispatcher.include_router(tournament_search_router)
     dispatcher.include_router(partner_selection_router)
     dispatcher.include_router(invitations_router)
+    dispatcher.include_router(pending_external_invites_router)
     return dispatcher
 
 

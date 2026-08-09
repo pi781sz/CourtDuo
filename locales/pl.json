@@ -146,5 +146,12 @@
     "share_text": "Jeśli szukasz partnera do debla na turnieje PZT, wypróbuj CourtDuo na Telegramie. Polecam! {link}",
     "whatsapp_button": "WhatsApp",
     "telegram_button": "Telegram"
+  },
+  "pending_external_invite": {
+    "joined": {
+      "M": "{name} dołączył do CourtDuo. Możesz teraz wysłać mu prawdziwe zaproszenie.",
+      "W": "{name} dołączyła do CourtDuo. Możesz teraz wysłać jej prawdziwe zaproszenie."
+    },
+    "send_button": "Wyślij zaproszenie"
   }
 }

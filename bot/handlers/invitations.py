@@ -246,7 +246,7 @@ async def handle_confirm_send(
             # already refuses to show the confirmation screen for this
             # case), but reached the same way if it ever is: gendered
             # wording and the share buttons, not a plain t() lookup.
-            await send_not_on_courtduo_response(callback.message, invitee, lang, bot)
+            await send_not_on_courtduo_response(callback.message, session, account, tournament, invitee, lang, bot)
             await state.set_state(PartnerSelection.waiting_name)
             return
         name = invitee.full_name

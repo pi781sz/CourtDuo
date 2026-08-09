@@ -1,8 +1,9 @@
 """The "Zaproś na CourtDuo" persistent-keyboard label (CLAUDE.md step 8.4,
 CHANGE 2, dropped down to two share channels by step 8.5): a generic
-invite, unattached to any tournament or named player -- that's build
-order step 9's pending_external_invites flow, and its "they joined"
-callback, neither of which this touches.
+invite, unattached to any tournament or named player -- that's
+bot.pending_external_invites' pending_external_invites flow, and its
+"they joined" callback (bot.handlers.pending_external_invites), neither of
+which this touches.
 
 No account is required to use it (nothing here needs one beyond the
 interface language), so it works even mid-registration, before the typed

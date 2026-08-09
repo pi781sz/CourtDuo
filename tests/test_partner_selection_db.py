@@ -565,8 +565,9 @@ async def test_all_checks_pass_hands_off_to_the_confirmation_screen(db_session: 
 
 async def test_a_named_player_who_does_not_use_courtduo_gets_no_confirmation_screen(db_session: AsyncSession):
     # The roster is PZT's, not CourtDuo's, so a perfectly real player may
-    # have no account to deliver an invitation to. CLAUDE.md scenario 2 is
-    # build order step 9; until then this must not dead-end.
+    # have no account to deliver an invitation to. CLAUDE.md scenario 2:
+    # this must not dead-end -- see tests/test_pending_external_invites_db.py
+    # for the pending_external_invites row this same call now also stores.
     tournament = _tournament()
     db_session.add(tournament)
     await db_session.flush()

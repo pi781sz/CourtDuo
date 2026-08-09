@@ -33,10 +33,15 @@ The application-level pre-invitation checks in CLAUDE.md's "Pre-invitation
 checks" section exist to give a player a friendly error *before* hitting
 these triggers, not to replace them.
 
-A `PendingExternalInvite` records an invitation sent to a typed name that
-isn't on CourtDuo yet (CLAUDE.md scenario 2), keyed on the typed name
-rather than a player row, since there is no player row to key on until
-that person registers.
+A `PendingExternalInvite` records an invitation attempt against a named
+player who is on PZT's roster but has no CourtDuo account yet (CLAUDE.md
+scenario 2; build order step 9). Keyed on `invitee_pzt_id`, not the typed
+string -- step 6's name matching (including disambiguation) already
+resolved the typed name to a specific `players` row before this is
+written, so there is a real player to key on even though there is no
+`accounts` row yet. When that pzt_id later registers, db.crud looks up
+every row here matching it and notifies each `inviter_pzt_id` still
+eligible to be told.
 """
 
 from __future__ import annotations
@@ -44,7 +49,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedAtMixin, TimestampMixin
@@ -96,15 +101,28 @@ class Invitation(TimestampMixin, Base):
 
 class PendingExternalInvite(CreatedAtMixin, Base):
     __tablename__ = "pending_external_invites"
+    __table_args__ = (
+        UniqueConstraint(
+            "inviter_pzt_id",
+            "invitee_pzt_id",
+            "tournament_guid",
+            name="uq_pending_external_invite_inviter_invitee_tournament",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     inviter_pzt_id: Mapped[str] = mapped_column(
         String, ForeignKey("players.pzt_id", ondelete="CASCADE"), nullable=False
     )
-    typed_name: Mapped[str] = mapped_column(String, nullable=False)
+    invitee_pzt_id: Mapped[str] = mapped_column(
+        String, ForeignKey("players.pzt_id", ondelete="CASCADE"), nullable=False
+    )
     tournament_guid: Mapped[str] = mapped_column(
         String, ForeignKey("tournaments.guid", ondelete="CASCADE"), nullable=False
     )
 
-    inviter: Mapped["Player"] = relationship(back_populates="pending_external_invites")
+    inviter: Mapped["Player"] = relationship(
+        foreign_keys=[inviter_pzt_id], back_populates="pending_external_invites"
+    )
+    invitee: Mapped["Player"] = relationship(foreign_keys=[invitee_pzt_id])
     tournament: Mapped["Tournament"] = relationship()
