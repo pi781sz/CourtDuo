@@ -19,6 +19,16 @@ find_partner_keyboard is the one exception, kept for bot.handlers.moje_deble:
 its own summary/empty state still needs a single "Znajdź partnera" button
 rather than "Moje deble" too, since tapping "Moje deble" there would just
 point back at the screen already on screen.
+
+invitation_sent_keyboard (step 8.7) is a second, narrower exception: the
+persistent reply keyboard can be collapsed by the player, and Telegram
+remembers that per chat regardless of is_persistent, so it cannot be the
+only way back to Moje deble. The one screen a player has just acted on and
+is most likely to want to check -- "Zaproszenie zostało wysłane" -- gets
+its own inline [Moje deble] button, reusing MojeDebleCallback and its
+existing handler unchanged. Deliberately not added to any other message:
+CLAUDE.md step 8.2 already established that mid-flow inline clutter is
+worse than the dead end it solves.
 """
 
 from __future__ import annotations
@@ -56,3 +66,12 @@ def persistent_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
     builder.button(text=t("common.invite_button", lang))
     builder.adjust(1, 2)
     return builder.as_markup(resize_keyboard=True, is_persistent=True)
+
+
+def invitation_sent_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """CLAUDE.md step 8.7: belt-and-braces inline [Moje deble] button for
+    the "Zaproszenie zostało wysłane" screen -- see the module docstring."""
+    builder = InlineKeyboardBuilder()
+    builder.button(text=t("common.moje_deble_button", lang), callback_data=MojeDebleCallback())
+    builder.adjust(1)
+    return builder.as_markup()

@@ -72,7 +72,7 @@ from bot.keyboards.invitations import (
     RejectInvitationCallback,
     invitation_answer_keyboard,
 )
-from bot.keyboards.navigation import persistent_menu_keyboard
+from bot.keyboards.navigation import invitation_sent_keyboard, persistent_menu_keyboard
 from bot.lang import lang_for
 from bot.notifications import push
 from bot.states import InvitationSend, PartnerSelection
@@ -289,7 +289,9 @@ async def handle_confirm_send(
     invitation.invitee_message_id = delivered
     await session.commit()
 
-    await callback.message.answer(sent_text(invitee.full_name, label, lang))
+    await callback.message.answer(
+        sent_text(invitee.full_name, label, lang), reply_markup=invitation_sent_keyboard(lang)
+    )
     # CLAUDE.md allows up to three pending invitations per tournament, and
     # a rejection frees the player to invite somebody else immediately —
     # so the tournament stays chosen and the name prompt stays live.

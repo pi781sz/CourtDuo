@@ -10,6 +10,7 @@ from bot.keyboards.navigation import (
     FindPartnerCallback,
     MojeDebleCallback,
     find_partner_keyboard,
+    invitation_sent_keyboard,
     persistent_menu_keyboard,
 )
 
@@ -37,6 +38,18 @@ def test_persistent_menu_keyboard_is_resizable_and_persistent():
 
     assert markup.resize_keyboard is True
     assert markup.is_persistent is True
+
+
+def test_invitation_sent_keyboard_has_one_moje_deble_button():
+    # CLAUDE.md step 8.7: belt-and-braces for "Zaproszenie zostało
+    # wysłane" -- an inline button, so it can't be collapsed the way the
+    # persistent reply keyboard can be.
+    markup = invitation_sent_keyboard("pl")
+
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert len(buttons) == 1
+    assert buttons[0].text == "Moje deble"
+    assert buttons[0].callback_data == MojeDebleCallback().pack()
 
 
 def test_find_partner_keyboard_and_moje_deble_callback_prefixes_unchanged():
