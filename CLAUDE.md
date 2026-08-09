@@ -176,6 +176,13 @@ Never reveal **who** that partner is — it is not the inviter's business.
 
 > *Zaproszenie do Peter Lorenz zostało już wysłane. Czekaj na odpowiedź.*
 
+**If the named player already has a pending invitation to *this* player for the same tournament** — don't create a second invitation chasing the same pair. Redirect the inviter to the answer they already owe instead of blocking them outright:
+
+> *Masz już zaproszenie od Peter Lorenz na ten turniej.*
+> *[Zatwierdź]  [Odrzuć]  [Nie jadę na ten turniej]*
+
+Reuses the exact invitation, the exact wording, and the exact three answer buttons the original notification carries — the player can simply accept it. Enforced twice: once here as a friendly pre-check, and again inside the send transaction itself (`SendFailure.ALREADY_INVITED_BY_INVITEE`), since the other player may have sent their invitation moments after this check ran.
+
 **If the named player's gender does not match the event:** refuse and explain.
 
 These checks are a courtesy, not a guarantee — the named player may accept someone else a second later. The atomic lock at accept time is what protects the data. Both are required.
@@ -218,7 +225,7 @@ An invitation gets a third button alongside Zatwierdź and Odrzuć: **"Nie jadę
 
 ## Status display — "Moje deble"
 
-One place a player sees every invitation they have sent or received, and what happened to it. Reachable two ways: the `/moje_deble` command, and a "Moje deble" button carried by every terminal message (see "A terminal message always carries a way back" below) and by the age-category screen.
+One place a player sees every invitation they have sent or received, and what happened to it. Reachable three ways: the `/moje_deble` command, "Moje deble" from the [Menu] chooser every terminal message opens (see "Buttons only at the end" below), and the "Moje deble" button carried directly by the age-category screen.
 
 Group by tournament, ordered by tournament date ascending. Two collapsing rules apply before anything is rendered:
 
@@ -255,7 +262,13 @@ Both directions are shown — invitations this player sent and ones they receive
 
 **Never** reveals who a third party's partner is — only this player's own matches. If another player is matched with someone else at a tournament, this view never names that someone else.
 
-**A terminal message always carries a way back.** "Never dead-end" (see "Tournament selection") applies to every message a handler sends, not just search results and notifications: any `message.answer` / `bot.send_message` / `callback.message.edit_text` call in `bot/` that does not carry a keyboard of its own must carry `[Moje deble] [Znajdź partnera]` — the latter returning the player straight to the age-category screen — unless it is immediately followed, in the same straight-line block, by another such call that does carry one (two message bubbles landing together, only the later one needs to be actionable). `tests/test_no_dead_ends.py` enforces this mechanically over every file in `bot/`, by inspecting the source rather than exercising every branch, so a future call site that forgets a keyboard fails the test instead of shipping. `/start` must never be the only way forward.
+**Buttons only at the end.** "Never dead-end" (see "Tournament selection") does not mean every message needs a keyboard — a mid-flow prompt like "Wpisz imię i nazwisko osoby, z którą chcesz grać." followed by navigation buttons is clutter that invites mis-taps, since those buttons would abandon the flow the player is already in.
+
+The rule: a message carries the `[Menu]` navigation button (`bot.keyboards.navigation.terminal_keyboard`) only when the journey has **ended** and the player has no next step in the current flow — a sent invitation, an accept/reject/"nie jadę" outcome on either side, "ten zawodnik znalazł już partnera", "masz już partnera na ten turniej", zero tournaments eligible for a category, the Moje deble summary, or any refusal that genuinely ends the attempt (tells the player to wait, not to type again). A **mid-flow** message — the next thing expected is the player typing or tapping something in the same flow, including a refusal that says "Wpisz imię i nazwisko innej osoby" — carries no navigation button at all; if it already has flow-specific buttons of its own (a tournament list, a category list, a disambiguation list, "Zmień miejscowość", "Zmień kategorię wiekową", "Pokaż wszystkie turnieje"), those stay and nothing is added.
+
+Tapping `[Menu]` opens one small chooser message with `[Znajdź partnera]` and `[Moje deble]` — one navigation entry point instead of two buttons stamped on every terminal screen. `Znajdź partnera` returns the player straight to the age-category screen. `/start` must never be the only way forward.
+
+`tests/test_no_dead_ends.py` checks this mechanically for every statically-traceable message (one passed to `t()` with a literal locale key) across `bot/`: a message on the terminal list must carry some navigation keyboard, and a message on the mid-flow list must never carry `[Menu]`. Messages composed by helper functions (`sent_text()`, `matched_text()`, ...) or chosen through a dict keyed by an enum aren't traceable this way and are instead covered by the handler-level tests in `tests/test_*_db.py`, which assert the actual buttons a real handler call produces.
 
 ---
 

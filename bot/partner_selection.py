@@ -29,12 +29,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.invitation_send import start_invitation_send
+from bot.invitation_text import already_invited_text
+from bot.keyboards.invitations import invitation_answer_keyboard
 from bot.keyboards.navigation import terminal_keyboard
 from bot.keyboards.tournament_search import category_keyboard
 from bot.states import PartnerSelection, TournamentSearch
+from bot.tournament_search import label_for_tournament
 from core.text import display_name, fold_diacritics
 from db import crud
-from db.models import Account, AgeCategory, Player, Tournament
+from db.models import Account, AgeCategory, Invitation, Player, Tournament
 from entitlements import can_send_invitation
 from scrapers.tournaments.models import resolve_ranking_code
 
@@ -233,6 +236,25 @@ _CHECK_FAILURE_MESSAGE_KEYS: dict[CheckFailure, str] = {
     CheckFailure.MAX_PENDING_REACHED: "partner_selection.max_pending_reached",
 }
 
+# CLAUDE.md build order step 8.2: which of the refusals above end the
+# attempt (get [Menu]) versus leave the player retyping a name in the same
+# flow (get no navigation button -- the message itself says "Wpisz imię i
+# nazwisko innej osoby."). PENDING_INVITATION_EXISTS and MAX_PENDING_REACHED
+# tell the player to wait instead, so there is nothing left to type here.
+_CHECK_FAILURE_TERMINAL = frozenset({CheckFailure.PENDING_INVITATION_EXISTS, CheckFailure.MAX_PENDING_REACHED})
+
+
+async def find_incoming_pending_invitation(
+    session: AsyncSession, account: Account, tournament: Tournament, candidate: Player
+) -> Invitation | None:
+    """PROBLEM 3 (CLAUDE.md, "Pre-invitation checks"): `candidate` may
+    already have sent `account` a PENDING invitation to this tournament --
+    inviting them back would just chase the same pair with a second
+    invitation. Checked before the rest of run_pre_invitation_checks and
+    before the confirmation screen.
+    """
+    return await crud.get_pending_invitation(session, candidate.pzt_id, account.pzt_id, tournament.guid)
+
 
 async def handle_partner_candidate(
     message: Message,
@@ -249,11 +271,22 @@ async def handle_partner_candidate(
     refusal leaves the player in PartnerSelection.waiting_name so they can
     type another name -- CLAUDE.md, "Never dead-end".
     """
+    incoming = await find_incoming_pending_invitation(session, account, tournament, candidate)
+    if incoming is not None:
+        # PROBLEM 3: `account` already owes `candidate` an answer -- redirect
+        # to it instead of creating a second invitation chasing the same pair.
+        await message.answer(
+            already_invited_text(candidate.full_name, label_for_tournament(tournament), lang),
+            reply_markup=invitation_answer_keyboard(incoming.id, lang),
+        )
+        return
+
     failure = await run_pre_invitation_checks(session, account, tournament, candidate)
     if failure is not None:
+        reply_markup = terminal_keyboard(lang) if failure in _CHECK_FAILURE_TERMINAL else None
         await message.answer(
             t(_CHECK_FAILURE_MESSAGE_KEYS[failure], lang, name=display_name(candidate.full_name)),
-            reply_markup=terminal_keyboard(lang),
+            reply_markup=reply_markup,
         )
         return
 
@@ -301,5 +334,6 @@ async def start_partner_selection(
         await state.set_state(TournamentSearch.waiting_category)
         return
 
-    await message.answer(t("partner_selection.ask_name", lang), reply_markup=terminal_keyboard(lang))
+    # Mid-flow (CLAUDE.md step 8.2): the next thing expected is typing a name.
+    await message.answer(t("partner_selection.ask_name", lang))
     await state.set_state(PartnerSelection.waiting_name)

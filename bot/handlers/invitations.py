@@ -89,6 +89,7 @@ _SEND_FAILURE_KEYS: dict[SendFailure, str] = {
     SendFailure.INVITER_ALREADY_MATCHED: "partner_selection.inviter_already_matched",
     SendFailure.INVITEE_ALREADY_MATCHED: "partner_selection.invitee_already_matched",
     SendFailure.PENDING_INVITATION_EXISTS: "partner_selection.pending_invitation_exists",
+    SendFailure.ALREADY_INVITED_BY_INVITEE: "invitation.already_invited_by_invitee",
     SendFailure.MAX_PENDING_REACHED: "partner_selection.max_pending_reached",
     SendFailure.TOURNAMENT_UNAVAILABLE: "tournament_search.tournament_gone",
 }
@@ -99,6 +100,21 @@ _SEND_FAILURE_KEYS: dict[SendFailure, str] = {
 # prompt (CLAUDE.md, "Never dead-end").
 _SEND_FAILURES_RESTARTING_SEARCH = frozenset(
     {SendFailure.INVITER_ALREADY_MATCHED, SendFailure.TOURNAMENT_UNAVAILABLE}
+)
+
+# CLAUDE.md build order step 8.2: which send failures end the attempt (get
+# [Menu]) versus leave the player retyping a name in the same flow (get no
+# navigation button — the message itself says "Wpisz imię i nazwisko innej
+# osoby."). Mirrors bot.partner_selection._CHECK_FAILURE_TERMINAL for the
+# three failure kinds both dicts share.
+_SEND_FAILURES_TERMINAL = frozenset(
+    {
+        SendFailure.NOT_ENTITLED,
+        SendFailure.INVITER_ALREADY_MATCHED,
+        SendFailure.PENDING_INVITATION_EXISTS,
+        SendFailure.ALREADY_INVITED_BY_INVITEE,
+        SendFailure.MAX_PENDING_REACHED,
+    }
 )
 
 _RESPOND_FAILURE_KEYS: dict[RespondFailure, str] = {
@@ -197,7 +213,10 @@ async def handle_confirm_send(
     if account is None or tournament is None or invitee is None:
         # State lost (a bot restart clears MemoryStorage) or the tournament
         # was re-scraped away between the confirmation screen and this tap.
-        await callback.message.answer(t("tournament_search.tournament_gone", lang), reply_markup=terminal_keyboard(lang))
+        # Mid-flow (CLAUDE.md step 8.2): always immediately followed by the
+        # keyboarded category screen below, when there's an account to show
+        # it to.
+        await callback.message.answer(t("tournament_search.tournament_gone", lang))
         if account is not None:
             gender = crud.gender_for_account_code(account.gender)
             await start_tournament_search(callback.message, state, lang, session, gender)
@@ -209,9 +228,10 @@ async def handle_confirm_send(
         name = invitee.full_name
         if result.inviter_partner_pzt_id is not None:
             _, name = await _participant(session, result.inviter_partner_pzt_id)
+        reply_markup = terminal_keyboard(lang) if result.failure in _SEND_FAILURES_TERMINAL else None
         await callback.message.answer(
             t(_SEND_FAILURE_KEYS[result.failure], lang, name=display_name(name)),
-            reply_markup=terminal_keyboard(lang),
+            reply_markup=reply_markup,
         )
         if result.failure in _SEND_FAILURES_RESTARTING_SEARCH:
             gender = crud.gender_for_account_code(account.gender)
@@ -239,10 +259,9 @@ async def handle_confirm_send(
         invitation.state = InvitationState.CANCELLED
         await session.commit()
         logger.warning("Invitation %s cancelled: could not be delivered", invitation.id)
-        await callback.message.answer(
-            t("invitation.delivery_failed", lang, name=display_name(invitee.full_name)),
-            reply_markup=terminal_keyboard(lang),
-        )
+        # Mid-flow (CLAUDE.md step 8.2): the message itself says to type
+        # another name.
+        await callback.message.answer(t("invitation.delivery_failed", lang, name=display_name(invitee.full_name)))
         await state.set_state(PartnerSelection.waiting_name)
         return
 
@@ -267,9 +286,10 @@ async def handle_cancel_send(callback: CallbackQuery, state: FSMContext, session
 
     # Nothing was written, so there is nothing to undo — this is why the
     # confirmation screen exists. Back to the name prompt with the
-    # tournament still chosen.
+    # tournament still chosen. Mid-flow (CLAUDE.md step 8.2): the next
+    # thing expected is typing a name.
     await callback.message.answer(t("invitation.send_cancelled", lang))
-    await callback.message.answer(t("partner_selection.ask_name", lang), reply_markup=terminal_keyboard(lang))
+    await callback.message.answer(t("partner_selection.ask_name", lang))
     await state.set_state(PartnerSelection.waiting_name)
 
 

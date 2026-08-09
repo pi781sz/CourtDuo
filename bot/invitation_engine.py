@@ -62,6 +62,11 @@ class SendFailure(Enum):
     INVITER_ALREADY_MATCHED = auto()
     INVITEE_ALREADY_MATCHED = auto()
     PENDING_INVITATION_EXISTS = auto()
+    # PROBLEM 3 (CLAUDE.md, "Pre-invitation checks"): the invitee already
+    # has a PENDING invitation to this player for this tournament -- caught
+    # here too, not just by bot.partner_selection's pre-check, since that
+    # invitation may have been sent seconds before this transaction started.
+    ALREADY_INVITED_BY_INVITEE = auto()
     MAX_PENDING_REACHED = auto()
     TOURNAMENT_UNAVAILABLE = auto()
 
@@ -140,6 +145,13 @@ async def send_invitation(
 
     if await crud.get_pending_invitation(session, account.pzt_id, invitee.pzt_id, tournament.guid) is not None:
         return SendResult(failure=SendFailure.PENDING_INVITATION_EXISTS)
+
+    # PROBLEM 3: the reverse direction -- `invitee` may have invited
+    # `account` a moment ago, after bot.partner_selection's pre-check ran
+    # but before this transaction started. Two invitations chasing the same
+    # pair is confusing and pointless; either being accepted matches them.
+    if await crud.get_pending_invitation(session, invitee.pzt_id, account.pzt_id, tournament.guid) is not None:
+        return SendResult(failure=SendFailure.ALREADY_INVITED_BY_INVITEE)
 
     pending = await crud.count_pending_outgoing_invitations(session, account.pzt_id, tournament.guid)
     if pending >= crud.MAX_PENDING_INVITATIONS_PER_TOURNAMENT:
