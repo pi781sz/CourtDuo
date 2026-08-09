@@ -44,7 +44,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, CreatedAtMixin, TimestampMixin
@@ -76,6 +76,17 @@ class Invitation(TimestampMixin, Base):
         server_default=InvitationState.PENDING.value,
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    # The Telegram message id of the notification pushed to the invitee
+    # when this invitation was sent (bot.handlers.invitations.handle_confirm_send).
+    # CLAUDE.md step 8.6: lets a later cancel best-effort strip that
+    # message's three answer buttons via edit_message_reply_markup, so a
+    # withdrawn invitation cannot still be tapped from the screen it first
+    # arrived on. Never set for an invitation whose push failed (there is
+    # no message to point at); a cancel with no id here simply skips the
+    # edit -- the transaction re-check is what actually prevents an answer,
+    # this is cosmetic only.
+    invitee_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
     inviter: Mapped["Player"] = relationship(foreign_keys=[inviter_pzt_id], back_populates="sent_invitations")
     invitee: Mapped["Player"] = relationship(foreign_keys=[invitee_pzt_id], back_populates="received_invitations")

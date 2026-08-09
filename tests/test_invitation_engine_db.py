@@ -24,9 +24,11 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.invitation_engine import (
+    CancelFailure,
     RespondFailure,
     SendFailure,
     accept_invitation,
+    cancel_invitation,
     not_attending_invitation,
     reject_invitation,
     send_invitation,
@@ -426,6 +428,147 @@ async def test_an_answered_invitation_cannot_be_answered_again(db_session: Async
 
     assert result.failure is RespondFailure.ALREADY_ANSWERED
     assert (await _states(db_session))[invitation.id] is InvitationState.REJECTED
+
+
+# --- cancelling (CLAUDE.md step 8.6) ---------------------------------------------
+
+
+async def test_cancel_withdraws_a_pending_invitation(db_session: AsyncSession):
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL001", "Testowa Anna", 6701)
+    await _add_user(db_session, "CNL002", "Testowa Jagoda", 6702)
+    anna = await _account(db_session, "CNL001")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await _player(db_session, "CNL002"), _NOW)
+    ).invitation
+
+    result = await cancel_invitation(db_session, invitation.id, "CNL001", _NOW)
+
+    assert result.failure is None
+    assert (await _states(db_session))[invitation.id] is InvitationState.CANCELLED
+
+
+async def test_cancel_refuses_a_tap_from_someone_who_is_not_the_inviter(db_session: AsyncSession):
+    # Callback payloads come from the client, so this is authorization --
+    # the same shape as RespondFailure.NOT_YOURS on the answering side.
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL010", "Testowa Anna", 6710)
+    await _add_user(db_session, "CNL011", "Testowa Jagoda", 6711)
+    await _add_user(db_session, "CNL012", "Testowa Ola", 6712)
+    anna = await _account(db_session, "CNL010")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await _player(db_session, "CNL011"), _NOW)
+    ).invitation
+
+    # Neither the invitee nor an unrelated third player may cancel it.
+    result_invitee = await cancel_invitation(db_session, invitation.id, "CNL011", _NOW)
+    result_stranger = await cancel_invitation(db_session, invitation.id, "CNL012", _NOW)
+
+    assert result_invitee.failure is CancelFailure.NOT_YOURS
+    assert result_stranger.failure is CancelFailure.NOT_YOURS
+    assert (await _states(db_session))[invitation.id] is InvitationState.PENDING
+
+
+async def test_cancel_frees_the_pending_slot_and_allows_re_inviting_the_same_person(db_session: AsyncSession):
+    # CLAUDE.md, "what a cancelled invitation frees up": unlike REJECTED or
+    # NOT_ATTENDING, a cancellation is the inviter's own change of mind, so
+    # re-inviting the *same* person for the *same* tournament is allowed.
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL020", "Testowa Anna", 6720)
+    await _add_user(db_session, "CNL021", "Testowa Jagoda", 6721)
+    anna = await _account(db_session, "CNL020")
+    jagoda = await _player(db_session, "CNL021")
+    invitation = (await send_invitation(db_session, anna, tournament, jagoda, _NOW)).invitation
+    await cancel_invitation(db_session, invitation.id, "CNL020", _NOW)
+
+    assert await crud.count_pending_outgoing_invitations(db_session, "CNL020", _GUID) == 0
+    assert await crud.get_answered_invitation(db_session, "CNL020", "CNL021", _GUID) is None
+
+    again = await send_invitation(db_session, anna, tournament, jagoda, _NOW)
+
+    assert again.failure is None
+
+
+async def test_cancel_of_an_accepted_invitation_reports_the_real_outcome_and_changes_nothing(
+    db_session: AsyncSession,
+):
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL030", "Testowa Anna", 6730)
+    await _add_user(db_session, "CNL031", "Testowa Jagoda", 6731)
+    anna = await _account(db_session, "CNL030")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await _player(db_session, "CNL031"), _NOW)
+    ).invitation
+    await accept_invitation(db_session, invitation.id, "CNL031", _NOW)
+
+    result = await cancel_invitation(db_session, invitation.id, "CNL030", _NOW)
+
+    assert result.failure is CancelFailure.ALREADY_ACCEPTED
+    assert result.invitation.id == invitation.id
+    # A confirmed match is locked (CLAUDE.md) -- cancel must not touch it.
+    assert (await _states(db_session))[invitation.id] is InvitationState.ACCEPTED
+
+
+async def test_cancel_of_a_rejected_invitation_reports_the_real_outcome(db_session: AsyncSession):
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL040", "Testowa Anna", 6740)
+    await _add_user(db_session, "CNL041", "Testowa Jagoda", 6741)
+    anna = await _account(db_session, "CNL040")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await _player(db_session, "CNL041"), _NOW)
+    ).invitation
+    await reject_invitation(db_session, invitation.id, "CNL041", _NOW)
+
+    result = await cancel_invitation(db_session, invitation.id, "CNL040", _NOW)
+
+    assert result.failure is CancelFailure.ALREADY_REJECTED
+    assert (await _states(db_session))[invitation.id] is InvitationState.REJECTED
+
+
+async def test_cancel_of_a_not_attending_invitation_reports_the_real_outcome(db_session: AsyncSession):
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL050", "Testowa Anna", 6750)
+    await _add_user(db_session, "CNL051", "Testowa Jagoda", 6751)
+    anna = await _account(db_session, "CNL050")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await _player(db_session, "CNL051"), _NOW)
+    ).invitation
+    await not_attending_invitation(db_session, invitation.id, "CNL051", _NOW)
+
+    result = await cancel_invitation(db_session, invitation.id, "CNL050", _NOW)
+
+    assert result.failure is CancelFailure.ALREADY_NOT_ATTENDING
+    assert (await _states(db_session))[invitation.id] is InvitationState.NOT_ATTENDING
+
+
+async def test_cancelling_twice_reports_already_cancelled(db_session: AsyncSession):
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL060", "Testowa Anna", 6760)
+    await _add_user(db_session, "CNL061", "Testowa Jagoda", 6761)
+    anna = await _account(db_session, "CNL060")
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await _player(db_session, "CNL061"), _NOW)
+    ).invitation
+    await cancel_invitation(db_session, invitation.id, "CNL060", _NOW)
+
+    result = await cancel_invitation(db_session, invitation.id, "CNL060", _NOW)
+
+    assert result.failure is CancelFailure.ALREADY_CANCELLED
+
+
+async def test_cancel_of_an_expired_invitation_marks_it_expired(db_session: AsyncSession):
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "CNL070", "Testowa Anna", 6770)
+    await _add_user(db_session, "CNL071", "Testowa Jagoda", 6771)
+    event = await crud.get_doubles_event(db_session, _GUID, Gender.GIRLS)
+    invitation = await crud.create_invitation(
+        db_session, "CNL070", "CNL071", tournament.guid, event.id, _NOW - timedelta(minutes=1)
+    )
+
+    result = await cancel_invitation(db_session, invitation.id, "CNL070", _NOW)
+
+    assert result.failure is CancelFailure.EXPIRED
+    assert (await _states(db_session))[invitation.id] is InvitationState.EXPIRED
 
 
 # --- concurrency: two real transactions, one winner ------------------------------

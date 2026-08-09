@@ -21,6 +21,7 @@ from bot.moje_deble import (
     entry_line,
     group_by_tournament,
     pending_received_entries,
+    pending_sent_entries,
     render_groups,
     tournament_finished,
     visible_entries,
@@ -431,3 +432,50 @@ def test_pending_received_entries_only_open_received_invitations():
     pending = pending_received_entries(groups)
 
     assert [entry.invitation_id for entry in pending] == [2]
+
+
+# --- pending_sent_entries: what gets the cancel button (CLAUDE.md step 8.6) -----
+
+
+def test_pending_sent_entries_only_open_sent_invitations():
+    anna = _player("P150", "Testowa Anna")
+    jagoda = _player("P151", "Testowa Jagoda")
+    ola = _player("P152", "Testowa Ola")
+    karol = _player("P153", "Testowy Karol")
+    tournament = _tournament("g150", date(2026, 8, 22))
+    matched_tournament = _tournament("g151", date(2026, 8, 29))
+    invitations = [
+        # Anna sent to Jagoda (sent, pending) -- actionable (cancel).
+        _invitation(1, anna, jagoda, tournament, InvitationState.PENDING, _T0),
+        # Ola sent to Anna (received, pending) -- not actionable here.
+        _invitation(2, ola, anna, tournament, InvitationState.PENDING, _T0),
+        # Already matched, at a different tournament.
+        _invitation(3, anna, karol, matched_tournament, InvitationState.ACCEPTED, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P150", today=date(2026, 8, 1), lang=_LANG)
+    pending = pending_sent_entries(groups)
+
+    assert [entry.invitation_id for entry in pending] == [1]
+
+
+def test_pending_sent_and_received_entries_never_overlap():
+    # CLAUDE.md step 8.6: only the sender ever gets the cancel button, only
+    # the invitee ever gets the three answer buttons -- never both on the
+    # same entry.
+    anna = _player("P160", "Testowa Anna")
+    jagoda = _player("P161", "Testowa Jagoda")
+    ola = _player("P162", "Testowa Ola")
+    tournament = _tournament("g160", date(2026, 8, 22))
+    invitations = [
+        _invitation(1, anna, jagoda, tournament, InvitationState.PENDING, _T0),
+        _invitation(2, ola, anna, tournament, InvitationState.PENDING, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P160", today=date(2026, 8, 1), lang=_LANG)
+    sent_ids = {entry.invitation_id for entry in pending_sent_entries(groups)}
+    received_ids = {entry.invitation_id for entry in pending_received_entries(groups)}
+
+    assert sent_ids == {1}
+    assert received_ids == {2}
+    assert sent_ids.isdisjoint(received_ids)

@@ -10,11 +10,16 @@ chat, or never started one. That is a normal outcome here, not an error to
 propagate: an unhandled TelegramForbiddenError inside an accept handler
 would abort the handler after the transaction had already decided the
 match, leaving the two players matched in the database and told nothing.
-So `push` swallows the API's failures, logs them and reports whether the
-message landed, and callers decide what a failed delivery means. For a new
-invitation it means the invitation must not stay 🟠 pending against a
-player who will never see it (see bot.handlers.invitations); for a status
-update it means nothing beyond the log line.
+So `push` swallows the API's failures, logs them and reports the sent
+message's id if it landed, and callers decide what a failed delivery
+means. For a new invitation it means the invitation must not stay 🟠
+pending against a player who will never see it (see
+bot.handlers.invitations); for a status update it means nothing beyond the
+log line. The returned id (CLAUDE.md step 8.6) lets a new invitation's push
+be remembered on the row (`invitations.invitee_message_id`), so a later
+cancel can best-effort strip its buttons -- callers that only care whether
+delivery succeeded can keep testing the result for truthiness, since a
+message id is always truthy and a failure is always None.
 
 Only telegram ids and invitation ids are logged, never names — the same
 rule bot.registration follows, for the same reason: these are children.
@@ -36,22 +41,23 @@ async def push(
     telegram_id: int,
     text: str,
     reply_markup: InlineKeyboardMarkup | ReplyKeyboardMarkup | None = None,
-) -> bool:
-    """Sends `text` to `telegram_id`. Returns True if Telegram accepted it."""
+) -> int | None:
+    """Sends `text` to `telegram_id`. Returns the sent message's id if
+    Telegram accepted it, None otherwise."""
     try:
-        await bot.send_message(telegram_id, text, reply_markup=reply_markup)
-        return True
+        message = await bot.send_message(telegram_id, text, reply_markup=reply_markup)
+        return message.message_id
     except TelegramForbiddenError:
         # Blocked the bot, or deleted the chat.
         logger.warning("Push rejected by Telegram (blocked or chat deleted): telegram_id=%s", telegram_id)
-        return False
+        return None
     except TelegramBadRequest as exc:
         # "chat not found" and friends — the account exists in CourtDuo but
         # the chat behind it no longer does.
         logger.warning("Push failed: telegram_id=%s (%s)", telegram_id, exc)
-        return False
+        return None
     except TelegramAPIError:
         # Network trouble, rate limits, an outage. Unexpected, so it keeps
         # its traceback, but it still must not take the handler down.
         logger.exception("Push failed unexpectedly: telegram_id=%s", telegram_id)
-        return False
+        return None

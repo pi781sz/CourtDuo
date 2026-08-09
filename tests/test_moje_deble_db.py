@@ -192,10 +192,11 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
     await handle_moje_deble_command(message, db_session)
 
     texts = _texts(message)
-    # No pending received invitations anywhere in this scenario (tournament
-    # 1 is matched-only, tournament 2 is all sent), so the summary is the
-    # only message -- no per-invitation follow-ups.
-    assert len(texts) == 1
+    # No pending *received* invitations anywhere in this scenario
+    # (tournament 1 is matched-only, tournament 2 is all sent), so no
+    # answer-keyboard follow-ups -- but the one still-open sent invitation
+    # (to Maja) gets its own cancel-button follow-up (CLAUDE.md step 8.6).
+    assert len(texts) == 2
     lines = texts[0].split("\n")
     # CLAUDE.md step 8.3, PROBLEM 6: a heading as the first line.
     assert lines[0] == "Moje deble"
@@ -210,6 +211,10 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
 
     markup = _markups(message)[0]
     assert _button_texts(markup) == ["Znajdź partnera"]
+
+    # The sent-pending follow-up: the cancel button, not the answer keyboard.
+    assert texts[1] == "🟠 Maja Testowa — wysłane"
+    assert _button_texts(_markups(message)[1]) == ["Anuluj zaproszenie"]
 
 
 async def test_received_pending_reads_differently_and_is_actionable(db_session: AsyncSession):
@@ -262,6 +267,31 @@ async def test_one_follow_up_message_per_pending_received_invitation(db_session:
     assert any("Ola Testowa" in text for text in follow_ups)
     for markup in _markups(message)[1:]:
         assert len(_button_texts(markup)) == 3
+
+
+# --- Cancelling (CLAUDE.md step 8.6): only the sender gets the button ----------
+
+
+async def test_sent_pending_gets_cancel_button_received_pending_gets_answer_buttons(db_session: AsyncSession):
+    await _add_user(db_session, "MDB080", "Testowa Anna", telegram_id=910080)
+    await _add_user(db_session, "MDB081", "Testowy Karol")
+    await _add_user(db_session, "MDB082", "Testowa Ola")
+    await _add_tournament(db_session, "mdb-t80", _FAR_FUTURE, venue_city="Radom")
+    await _add_tournament(db_session, "mdb-t81", _FAR_FUTURE + timedelta(days=1), venue_city="Łódź")
+    # Anna sent this one -- she may cancel it, Karol only answers it.
+    await _add_invitation(db_session, "MDB080", "MDB081", "mdb-t80", InvitationState.PENDING)
+    # Ola sent this one to Anna -- Anna answers it, she has no cancel button.
+    await _add_invitation(db_session, "MDB082", "MDB080", "mdb-t81", InvitationState.PENDING)
+
+    message = _make_message(910080)
+    await handle_moje_deble_command(message, db_session)
+
+    follow_ups = list(zip(_texts(message)[1:], _markups(message)[1:]))
+    sent_follow_up = next(text_markup for text_markup in follow_ups if "Karol" in text_markup[0])
+    received_follow_up = next(text_markup for text_markup in follow_ups if "Ola" in text_markup[0])
+
+    assert _button_texts(sent_follow_up[1]) == ["Anuluj zaproszenie"]
+    assert _button_texts(received_follow_up[1]) == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
 
 
 # --- WHAT IT HIDES: finished tournaments, day boundary --------------------------

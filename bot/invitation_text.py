@@ -188,3 +188,26 @@ def not_attending_inviter_text(invitee_full_name: str, lang: str) -> str:
         emoji=STATUS_EMOJI[InvitationState.NOT_ATTENDING],
         name=display_name(invitee_full_name),
     )
+
+
+# --- Cancelling (CLAUDE.md step 8.6) --------------------------------------------
+
+
+def cancelled_inviter_text(invitee_full_name: str, tournament: str, lang: str) -> str:
+    """The inviter's own confirmation after withdrawing a PENDING
+    invitation they sent -- names the person and the tournament, per
+    CLAUDE.md step 8.6."""
+    return t("invitation.cancelled_inviter", lang, name=display_name(invitee_full_name), tournament=tournament)
+
+
+def cancelled_invitee_text(inviter_full_name: str, inviter_gender: str | None, tournament: str, lang: str) -> str:
+    """What the invitee is told when the inviter withdraws. Gendered on the
+    *inviter's* gender (wycofał/wycofała) -- it's the inviter's action
+    being described, third person, same shape as rejected_inviter_text."""
+    return gendered(
+        "invitation.cancelled_invitee",
+        inviter_gender,
+        lang,
+        name=display_name(inviter_full_name),
+        tournament=tournament,
+    )

@@ -17,6 +17,12 @@ received invitation gets its own follow-up message carrying step 7's own
 three-button keyboard (bot.keyboards.invitations.invitation_answer_keyboard)
 unchanged, wired to the exact same handlers
 (bot.handlers.invitations.handle_accept/handle_reject/handle_not_attending).
+
+Step 8.6: a pending *sent* invitation gets the same treatment, one
+follow-up message per invitation, but with a single "Anuluj zaproszenie"
+button (bot.keyboards.invitations.cancel_invitation_keyboard) instead --
+only the sender may withdraw it, so a received invitation never gets this
+button and a sent one never gets the three answer buttons.
 """
 
 from __future__ import annotations
@@ -32,10 +38,16 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import all_translations, t
-from bot.keyboards.invitations import invitation_answer_keyboard
+from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard
 from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard, persistent_menu_keyboard
 from bot.lang import lang_for
-from bot.moje_deble import entry_line, group_by_tournament, pending_received_entries, render_groups
+from bot.moje_deble import (
+    entry_line,
+    group_by_tournament,
+    pending_received_entries,
+    pending_sent_entries,
+    render_groups,
+)
 from db import crud
 from db.models import Account
 
@@ -80,6 +92,13 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     for entry in pending_received_entries(groups):
         await message.answer(
             entry_line(entry, lang), reply_markup=invitation_answer_keyboard(entry.invitation_id, lang)
+        )
+    # CLAUDE.md step 8.6: the same treatment for a still-open sent
+    # invitation, but with the single cancel button instead -- the invitee
+    # answers, the inviter withdraws, never the other way round.
+    for entry in pending_sent_entries(groups):
+        await message.answer(
+            entry_line(entry, lang), reply_markup=cancel_invitation_keyboard(entry.invitation_id, lang)
         )
 
 
