@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 
+from bot.formatting import STATUS_EMOJI
 from bot.moje_deble import (
     Direction,
     entry_from_invitation,
@@ -167,19 +168,27 @@ def test_visible_entries_excludes_finished_tournaments():
 # --- group_by_tournament: ordering ---------------------------------------------
 
 
-def test_groups_are_ordered_by_tournament_date_ascending():
+def test_groups_are_ordered_by_own_most_recent_activity_oldest_first():
+    # CLAUDE.md step 8.3, PROBLEM 7: activity order, oldest first, newest
+    # last -- not tournament date. The tournament dates below are chosen
+    # the opposite way round from the activity timestamps to prove it's the
+    # latter driving the order.
+    from datetime import timedelta
+
     anna = _player("P030", "Testowa Anna")
     jagoda = _player("P031", "Testowa Jagoda")
-    later = _tournament("late", date(2026, 9, 1))
-    earlier = _tournament("early", date(2026, 8, 1))
+    later_date = _tournament("late-date", date(2026, 9, 1))
+    earlier_date = _tournament("early-date", date(2026, 8, 1))
     invitations = [
-        _invitation(1, anna, jagoda, later, InvitationState.PENDING, _T0),
-        _invitation(2, anna, jagoda, earlier, InvitationState.PENDING, _T0),
+        # Tournament date is later, but the activity on it is older.
+        _invitation(1, anna, jagoda, later_date, InvitationState.PENDING, _T0),
+        # Tournament date is earlier, but the activity on it is more recent.
+        _invitation(2, anna, jagoda, earlier_date, InvitationState.PENDING, _T0 + timedelta(hours=1)),
     ]
 
     groups = group_by_tournament(invitations, "P030", today=date(2026, 7, 1), lang=_LANG)
 
-    assert [group.tournament_guid for group in groups] == ["early", "late"]
+    assert [group.tournament_guid for group in groups] == ["late-date", "early-date"]
 
 
 def test_matched_hides_everything_else_in_that_tournament():
@@ -201,7 +210,9 @@ def test_matched_hides_everything_else_in_that_tournament():
     assert [entry.invitation_id for entry in groups[0].entries] == [2]
 
 
-def test_within_a_tournament_non_matched_entries_sort_most_recent_first():
+def test_within_a_tournament_non_matched_entries_sort_oldest_activity_first():
+    # CLAUDE.md step 8.3, PROBLEM 7: oldest first, newest last, so the most
+    # recent thing sits at the bottom nearest the input box.
     from datetime import timedelta
 
     anna = _player("P050", "Testowa Anna")
@@ -215,7 +226,7 @@ def test_within_a_tournament_non_matched_entries_sort_most_recent_first():
 
     groups = group_by_tournament(invitations, "P050", today=date(2026, 8, 1), lang=_LANG)
 
-    assert [entry.invitation_id for entry in groups[0].entries] == [2, 1]
+    assert [entry.invitation_id for entry in groups[0].entries] == [1, 2]
 
 
 # --- collapsing repeats between the same pair -----------------------------------
@@ -329,6 +340,27 @@ def test_matched_wording_is_symmetric_regardless_of_direction():
 
     assert as_inviter == "🟢 Gracie razem: Jagoda Testowa"
     assert as_invitee == "🟢 Gracie razem: Anna Testowa"
+
+
+# --- CLAUDE.md step 8.3, PROBLEM 2: every line's colour comes from the lookup ---
+
+
+def test_every_visible_state_renders_its_status_emoji_lookup_value():
+    anna = _player("P095", "Testowa Anna")
+    jagoda = _player("P096", "Testowa Jagoda")
+    tournament = _tournament("g95", date(2026, 8, 22))
+
+    for state in (
+        InvitationState.PENDING,
+        InvitationState.ACCEPTED,
+        InvitationState.REJECTED,
+        InvitationState.NOT_ATTENDING,
+    ):
+        invitation = _invitation(1, anna, jagoda, tournament, state, _T0)
+        sent_line = entry_line(entry_from_invitation(invitation, "P095"), _LANG)
+        received_line = entry_line(entry_from_invitation(invitation, "P096"), _LANG)
+        assert sent_line.startswith(STATUS_EMOJI[state])
+        assert received_line.startswith(STATUS_EMOJI[state])
 
 
 def test_render_groups_matches_claude_md_layout():

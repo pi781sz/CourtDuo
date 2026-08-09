@@ -31,7 +31,7 @@ from bot.invitation_engine import (
     reject_invitation,
     send_invitation,
 )
-from bot.partner_selection import run_pre_invitation_checks
+from bot.partner_selection import CheckFailure, run_pre_invitation_checks
 from db import crud
 from db.models import (
     Account,
@@ -362,11 +362,31 @@ async def test_reject_frees_the_inviter_to_invite_someone_else_immediately(db_se
     assert again.failure is None
 
 
+async def test_reject_blocks_re_inviting_the_same_person_for_the_same_tournament(db_session: AsyncSession):
+    # CLAUDE.md step 8.3, PROBLEM 5: a rejection frees the inviter to
+    # invite someone else -- not the same person again. Checked both at
+    # the friendly pre-check and inside the send transaction itself.
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "REJ020", "Testowa Anna", 6420)
+    await _add_user(db_session, "REJ021", "Testowa Jagoda", 6421)
+    anna = await _account(db_session, "REJ020")
+    jagoda = await _player(db_session, "REJ021")
+    invitation = (await send_invitation(db_session, anna, tournament, jagoda, _NOW)).invitation
+    await reject_invitation(db_session, invitation.id, "REJ021", _NOW)
+
+    assert await run_pre_invitation_checks(db_session, anna, tournament, jagoda) is CheckFailure.ALREADY_ANSWERED
+    again = await send_invitation(db_session, anna, tournament, jagoda, _NOW)
+    assert again.failure is SendFailure.ALREADY_ANSWERED
+    assert await crud.count_pending_outgoing_invitations(db_session, "REJ020", _GUID) == 0
+
+
 async def test_not_attending_leaves_no_persistent_state_about_player_and_tournament(db_session: AsyncSession):
     # CLAUDE.md is emphatic: NOT_ATTENDING closes one invitation and
     # nothing else. It must not block, hide or filter any future
-    # invitation to that player for that tournament -- players change
-    # their minds, enter late and withdraw.
+    # invitation to that player for that tournament from someone else --
+    # players change their minds, enter late and withdraw. CLAUDE.md step
+    # 8.3, PROBLEM 5 narrows this one way: the *same* inviter may not
+    # re-invite the same player to the same tournament again.
     tournament = await _add_tournament(db_session)
     await _add_user(db_session, "NAT001", "Testowa Anna", 6501)
     await _add_user(db_session, "NAT002", "Testowa Jagoda", 6502)
@@ -381,14 +401,13 @@ async def test_not_attending_leaves_no_persistent_state_about_player_and_tournam
     assert answered.failure is None
     assert (await _states(db_session))[first.id] is InvitationState.NOT_ATTENDING
 
-    # Step 6's courtesy checks do not filter on it...
-    assert await run_pre_invitation_checks(db_session, anna, tournament, jagoda) is None
-    assert await run_pre_invitation_checks(db_session, ola, tournament, jagoda) is None
-    # ...the same inviter may ask the same player again...
+    # The same inviter is blocked from re-inviting the same player here...
+    assert await run_pre_invitation_checks(db_session, anna, tournament, jagoda) is CheckFailure.ALREADY_ANSWERED
     again = await send_invitation(db_session, anna, tournament, jagoda, _NOW)
-    assert again.failure is None
-    assert again.invitation.state is InvitationState.PENDING
-    # ...and so may a different player, for the same tournament.
+    assert again.failure is SendFailure.ALREADY_ANSWERED
+    # ...but a different player may still invite her, for the same
+    # tournament -- NOT_ATTENDING is not a stored fact blocking anyone else.
+    assert await run_pre_invitation_checks(db_session, ola, tournament, jagoda) is None
     from_someone_else = await send_invitation(db_session, ola, tournament, jagoda, _NOW)
     assert from_someone_else.failure is None
 

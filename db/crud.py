@@ -323,6 +323,33 @@ async def get_rankings_for_player_in_period(
     return list(result.scalars().all())
 
 
+async def get_player_own_age_category(session: AsyncSession, pzt_id: str) -> AgeCategory | None:
+    """CLAUDE.md step 8.3, "Deriving a player's own age category": the
+    LOWEST ranking list a player appears in for the newest (year, month)
+    overall in `rankings` -- e.g. a player in M14 and M16 is a U14 player
+    playing up, so their category is 14. `players.age_category` is a
+    snapshot of whichever ranking row was scraped last (db.crud.
+    upsert_ranking_entry) and is not guaranteed to be the lowest one, so
+    this is derived fresh from `rankings` rather than read off that column.
+
+    Returns None when the player has no ranking rows in the newest period
+    at all -- registration requires a PZT id present in a ranking list, so
+    this should not happen for a registered player, but it must never be
+    guessed at.
+    """
+    period = await get_latest_ranking_period_overall(session)
+    if period is None:
+        return None
+    year, month = period
+    rankings = await get_rankings_for_player_in_period(session, pzt_id.upper(), year, month)
+    if not rankings:
+        return None
+    return min(
+        (_AGE_CATEGORY_BY_LABEL[r.ranking_list.age_category_label] for r in rankings),
+        key=lambda category: category.value,
+    )
+
+
 async def get_tournament_by_guid(session: AsyncSession, guid: str) -> Tournament | None:
     result = await session.execute(select(Tournament).where(Tournament.guid == guid))
     return result.scalar_one_or_none()
@@ -463,6 +490,32 @@ async def get_pending_invitation(
         )
     )
     return result.scalar_one_or_none()
+
+
+# CLAUDE.md step 8.3, PROBLEM 5: a REJECTED or NOT_ATTENDING answer blocks
+# the same inviter from re-inviting the same player to the same tournament
+# -- "rejection is instant and free" still holds, but for someone else, not
+# the same person again.
+_ANSWERED_INVITATION_STATES = (InvitationState.REJECTED, InvitationState.NOT_ATTENDING)
+
+
+async def get_answered_invitation(
+    session: AsyncSession, inviter_pzt_id: str, invitee_pzt_id: str, tournament_guid: str
+) -> Invitation | None:
+    """CLAUDE.md step 8.3, PROBLEM 5: an invitation `inviter_pzt_id` already
+    sent `invitee_pzt_id` for this tournament that was answered REJECTED or
+    NOT_ATTENDING, if any. Directional -- `invitee_pzt_id` inviting
+    `inviter_pzt_id` back afterwards is a separate action this does not see.
+    """
+    result = await session.execute(
+        select(Invitation).where(
+            Invitation.tournament_guid == tournament_guid,
+            Invitation.inviter_pzt_id == inviter_pzt_id,
+            Invitation.invitee_pzt_id == invitee_pzt_id,
+            Invitation.state.in_(_ANSWERED_INVITATION_STATES),
+        )
+    )
+    return result.scalars().first()
 
 
 async def count_pending_outgoing_invitations(session: AsyncSession, inviter_pzt_id: str, tournament_guid: str) -> int:

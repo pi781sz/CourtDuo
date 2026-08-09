@@ -232,6 +232,97 @@ async def test_check_2_gender_mismatch_is_refused(db_session: AsyncSession):
     assert failure is CheckFailure.GENDER_MISMATCH
 
 
+# --- PROBLEM 1b: the named player's own age ceiling ---------------------------
+
+
+async def test_age_check_refuses_a_player_too_old_for_the_tournament(db_session: AsyncSession):
+    # CLAUDE.md step 8.3, PROBLEM 1b: a player may play up but never down --
+    # the tournament here is U14 (MLODZICY), the candidate is a U16 player.
+    tournament = _tournament(age_category=AgeCategory.MLODZICY)
+    db_session.add(tournament)
+    await db_session.flush()
+    await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "AGE101", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2101, "AGE101", "Testowa Anna", "W")
+    await _add_player(db_session, "AGE102", "Testowa Amelia", gender=Gender.GIRLS)
+    db_session.add(Ranking(player_pzt_id="AGE102", ranking_list=RankingList.W16, year=2026, month=8, position=1))
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "AGE101")
+    candidate = await crud.get_player_by_pzt_id(db_session, "AGE102")
+
+    failure = await run_pre_invitation_checks(db_session, account, tournament, candidate)
+
+    assert failure is CheckFailure.AGE_INELIGIBLE
+
+
+async def test_age_check_allows_a_younger_player_playing_up(db_session: AsyncSession):
+    # A U12 player entering a U14 draw is fine -- younger players play up.
+    tournament = _tournament(age_category=AgeCategory.MLODZICY)
+    db_session.add(tournament)
+    await db_session.flush()
+    await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "AGE103", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2103, "AGE103", "Testowa Anna", "W")
+    await _add_player(db_session, "AGE104", "Testowa Zosia", gender=Gender.GIRLS)
+    db_session.add(Ranking(player_pzt_id="AGE104", ranking_list=RankingList.W12, year=2026, month=8, position=1))
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "AGE103")
+    candidate = await crud.get_player_by_pzt_id(db_session, "AGE104")
+
+    failure = await run_pre_invitation_checks(db_session, account, tournament, candidate)
+
+    assert failure is None
+
+
+async def test_age_check_never_blocks_a_candidate_with_no_ranking_rows_at_all(db_session: AsyncSession):
+    # CLAUDE.md step 8.3, PROBLEM 1b: never guess an age -- fall through to
+    # the rest of the checks instead of blocking.
+    tournament = _tournament(age_category=AgeCategory.MLODZICY)
+    db_session.add(tournament)
+    await db_session.flush()
+    await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "AGE105", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2105, "AGE105", "Testowa Anna", "W")
+    await _add_player(db_session, "AGE106", "Testowa Nowa", gender=Gender.GIRLS)
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "AGE105")
+    candidate = await crud.get_player_by_pzt_id(db_session, "AGE106")
+
+    failure = await run_pre_invitation_checks(db_session, account, tournament, candidate)
+
+    assert failure is None
+
+
+async def test_age_check_fires_before_the_not_on_courtduo_message(db_session: AsyncSession):
+    # Live testing found "Amelia Nowak nie używa jeszcze CourtDuo" shown for
+    # a player who was simply too old for the draw -- the age reason is the
+    # true one and must be reported first. The candidate here is both too
+    # old AND has no CourtDuo account.
+    tournament = _tournament(age_category=AgeCategory.MLODZICY)
+    db_session.add(tournament)
+    await db_session.flush()
+    await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "AGE107", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2107, "AGE107", "Testowa Anna", "W")
+    await _add_player(db_session, "AGE108", "Testowa Amelia", gender=Gender.GIRLS)
+    db_session.add(Ranking(player_pzt_id="AGE108", ranking_list=RankingList.W16, year=2026, month=8, position=1))
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "AGE107")
+    candidate = await crud.get_player_by_pzt_id(db_session, "AGE108")
+    message = _make_message()
+    state = _make_state(2107)
+
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
+
+    texts = [call.args[0] for call in message.answer.call_args_list]
+    assert any("nie może grać w kategorii U14" in text for text in texts)
+    assert not any("nie używa jeszcze CourtDuo" in text for text in texts)
+
+
 async def test_check_3_inviter_already_matched_skips_the_name_prompt(db_session: AsyncSession):
     tournament = _tournament()
     db_session.add(tournament)
@@ -297,6 +388,67 @@ async def test_check_4_invitee_already_matched_does_not_reveal_partner(db_sessio
     failure = await run_pre_invitation_checks(db_session, account, tournament, candidate)
 
     assert failure is CheckFailure.INVITEE_ALREADY_MATCHED
+
+
+async def test_already_answered_check_blocks_re_inviting_a_rejecter(db_session: AsyncSession):
+    # CLAUDE.md step 8.3, PROBLEM 5.
+    tournament = _tournament()
+    db_session.add(tournament)
+    await db_session.flush()
+    event_id = await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "INV004", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2004, "INV004", "Testowa Anna", "W")
+    await _add_player(db_session, "INV005", "Testowa Jagoda", gender=Gender.GIRLS)
+    _add_invitation(db_session, "INV004", "INV005", tournament.guid, event_id, InvitationState.REJECTED)
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "INV004")
+    candidate = await crud.get_player_by_pzt_id(db_session, "INV005")
+
+    failure = await run_pre_invitation_checks(db_session, account, tournament, candidate)
+
+    assert failure is CheckFailure.ALREADY_ANSWERED
+
+
+async def test_already_answered_check_blocks_re_inviting_after_not_attending(db_session: AsyncSession):
+    tournament = _tournament()
+    db_session.add(tournament)
+    await db_session.flush()
+    event_id = await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "INV006", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2006, "INV006", "Testowa Anna", "W")
+    await _add_player(db_session, "INV007", "Testowa Jagoda", gender=Gender.GIRLS)
+    _add_invitation(db_session, "INV006", "INV007", tournament.guid, event_id, InvitationState.NOT_ATTENDING)
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "INV006")
+    candidate = await crud.get_player_by_pzt_id(db_session, "INV007")
+
+    failure = await run_pre_invitation_checks(db_session, account, tournament, candidate)
+
+    assert failure is CheckFailure.ALREADY_ANSWERED
+
+
+async def test_already_answered_check_does_not_block_the_reverse_direction(db_session: AsyncSession):
+    # Directional: the rejecter turning around and inviting the original
+    # inviter back is a separate action, not blocked by this check.
+    tournament = _tournament()
+    db_session.add(tournament)
+    await db_session.flush()
+    event_id = await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "INV008", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2008, "INV008", "Testowa Anna", "W")
+    await _add_player(db_session, "INV009", "Testowa Jagoda", gender=Gender.GIRLS)
+    await _add_account(db_session, 2009, "INV009", "Testowa Jagoda", "W")
+    _add_invitation(db_session, "INV008", "INV009", tournament.guid, event_id, InvitationState.REJECTED)
+    await db_session.flush()
+
+    jagoda = await crud.get_account_by_pzt_id(db_session, "INV009")
+    anna = await crud.get_player_by_pzt_id(db_session, "INV008")
+
+    failure = await run_pre_invitation_checks(db_session, jagoda, tournament, anna)
+
+    assert failure is None
 
 
 async def test_check_5_pending_invitation_already_sent_is_refused(db_session: AsyncSession):
@@ -369,7 +521,7 @@ async def test_already_invited_by_candidate_redirects_to_answering_instead_of_a_
     assert any("Ola Testowa" in text for text in texts)
     markup = message.answer.call_args.kwargs["reply_markup"]
     button_texts = [button.text for row in markup.inline_keyboard for button in row]
-    assert button_texts == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
+    assert button_texts == ["✅ Zatwierdź", "❌ Odrzuć", "⛔ Nie jadę na ten turniej", "🔵 Menu"]
     # Still just the one invitation -- no second one was created, and no
     # confirmation screen was shown (the state stays wherever it started).
     assert await crud.count_pending_outgoing_invitations(db_session, "INV001", tournament.guid) == 0

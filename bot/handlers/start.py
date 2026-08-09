@@ -47,8 +47,7 @@ async def handle_start(message: Message, state: FSMContext, session: AsyncSessio
     if account is not None:
         # CLAUDE.md scenario 3: returning player skips registration
         # entirely, straight to tournament search.
-        gender = crud.gender_for_account_code(account.gender)
-        await start_tournament_search(message, state, lang_for(account), session, gender)
+        await start_tournament_search(message, state, lang_for(account), session, account)
         return
 
     # CLAUDE.md step 8.2: mid-flow -- the next thing expected is typing a
@@ -77,5 +76,4 @@ async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSessi
 
     account = result.account
     await message.answer(t("registration.welcome", lang, first_name=first_name(account.full_name)))
-    gender = crud.gender_for_account_code(account.gender)
-    await start_tournament_search(message, state, lang_for(account), session, gender)
+    await start_tournament_search(message, state, lang_for(account), session, account)

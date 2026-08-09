@@ -58,9 +58,8 @@ async def handle_partner_name(message: Message, state: FSMContext, session: Asyn
         # send the player back to the top of tournament search. Mid-flow
         # (CLAUDE.md step 8.2): always immediately followed by the
         # keyboarded category screen below.
-        gender = crud.gender_for_account_code(account.gender)
         await message.answer(t("tournament_search.tournament_gone", lang))
-        await start_tournament_search(message, state, lang, session, gender)
+        await start_tournament_search(message, state, lang, session, account)
         return
 
     matches = await find_matching_players(session, tokens)
@@ -100,9 +99,8 @@ async def handle_partner_select(
     await callback.answer()
 
     if tournament is None:
-        gender = crud.gender_for_account_code(account.gender)
         await callback.message.answer(t("tournament_search.tournament_gone", lang))
-        await start_tournament_search(callback.message, state, lang, session, gender)
+        await start_tournament_search(callback.message, state, lang, session, account)
         return
     if candidate is None:
         # Extremely unlikely -- the player row disappeared between the

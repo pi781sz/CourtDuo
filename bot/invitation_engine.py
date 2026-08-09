@@ -61,6 +61,12 @@ class SendFailure(Enum):
     GENDER_MISMATCH = auto()
     INVITER_ALREADY_MATCHED = auto()
     INVITEE_ALREADY_MATCHED = auto()
+    # CLAUDE.md step 8.3, PROBLEM 5: this inviter already sent this invitee
+    # an invitation for this tournament that was REJECTED or NOT_ATTENDING
+    # -- caught here too, not just by bot.partner_selection's pre-check,
+    # since the answer may have landed seconds before this transaction
+    # started.
+    ALREADY_ANSWERED = auto()
     PENDING_INVITATION_EXISTS = auto()
     # PROBLEM 3 (CLAUDE.md, "Pre-invitation checks"): the invitee already
     # has a PENDING invitation to this player for this tournament -- caught
@@ -142,6 +148,12 @@ async def send_invitation(
 
     if await crud.get_matched_invitation(session, invitee.pzt_id, tournament.guid) is not None:
         return SendResult(failure=SendFailure.INVITEE_ALREADY_MATCHED)
+
+    # PROBLEM 5: re-checked here too -- the pre-check in
+    # bot.partner_selection ran seconds earlier and the answer could have
+    # landed since.
+    if await crud.get_answered_invitation(session, account.pzt_id, invitee.pzt_id, tournament.guid) is not None:
+        return SendResult(failure=SendFailure.ALREADY_ANSWERED)
 
     if await crud.get_pending_invitation(session, account.pzt_id, invitee.pzt_id, tournament.guid) is not None:
         return SendResult(failure=SendFailure.PENDING_INVITATION_EXISTS)
@@ -341,8 +353,8 @@ async def not_attending_invitation(
     block, hide or filter a future invitation to the same player for the
     same tournament, and nothing may start — players change their minds,
     enter late and withdraw. Only the wording the two sides see differs
-    (bot.invitation_text), so the inviter gets a neutral 🟠 rather than a
-    🔴 refusal.
+    (bot.invitation_text) -- the colour is the same 🔴 as a refusal
+    (CLAUDE.md step 8.3, PROBLEM 2: "not happening" either way).
     """
     return await _answer_without_matching(
         session, invitation_id, responder_pzt_id, now, InvitationState.NOT_ATTENDING

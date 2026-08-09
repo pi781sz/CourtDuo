@@ -30,7 +30,7 @@ def test_terminal_keyboard_has_one_menu_button():
     markup = terminal_keyboard("pl")
 
     buttons = [button for row in markup.inline_keyboard for button in row]
-    assert [button.text for button in buttons] == ["Menu"]
+    assert [button.text for button in buttons] == ["🔵 Menu"]
     assert buttons[0].callback_data == MenuCallback().pack()
 
 

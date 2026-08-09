@@ -69,8 +69,11 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     # CLAUDE.md step 8.1: "The summary list message itself gets [Znajdź
     # partnera]." Not [Moje deble] too, for the same reason as the empty
     # state -- it would only point back at the screen the player is
-    # already looking at.
-    await message.answer(render_groups(groups, lang), reply_markup=find_partner_keyboard(lang))
+    # already looking at. Step 8.3, PROBLEM 6: a heading as the first line,
+    # so a player scrolling back through the chat knows what this message is.
+    heading = t("moje_deble.heading", lang)
+    body = render_groups(groups, lang)
+    await message.answer(f"{heading}\n\n{body}", reply_markup=find_partner_keyboard(lang))
 
     # One follow-up message per still-open received invitation, each with
     # its own answer keyboard, since a single summary message can't carry

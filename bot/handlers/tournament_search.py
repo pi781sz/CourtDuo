@@ -42,6 +42,7 @@ from bot.states import TournamentSearch
 from bot.tournament_search import (
     TournamentOption,
     cap_results,
+    categories_for_own_category,
     category_selected_text,
     match_by_place,
     meets_min_place_length,
@@ -49,7 +50,7 @@ from bot.tournament_search import (
     to_option,
 )
 from db import crud
-from db.models import AgeCategory, Gender
+from db.models import Account, AgeCategory, Gender
 
 router = Router(name="tournament_search")
 
@@ -77,9 +78,17 @@ async def _eligible_options(
     return [to_option(tournament) for tournament in tournaments]
 
 
-async def _send_category_prompt(message: Message, session: AsyncSession, gender: Gender, lang: str) -> None:
+async def _send_category_prompt(message: Message, session: AsyncSession, account: Account, lang: str) -> None:
+    gender = crud.gender_for_account_code(account.gender)
+    own_category = await crud.get_player_own_age_category(session, account.pzt_id)
     counts = await _category_counts(session, gender)
-    await message.answer(t("tournament_search.ask_category", lang), reply_markup=category_keyboard(counts, lang))
+    # CLAUDE.md build order step 8.3, PROBLEM 6: a short heading so a
+    # player scrolling back through the chat knows what this screen is.
+    heading = t("tournament_search.category_heading", lang)
+    body = t("tournament_search.ask_category", lang)
+    await message.answer(
+        f"{heading}\n{body}", reply_markup=category_keyboard(counts, lang, own_category)
+    )
 
 
 def _results_text(capped: bool, lang: str) -> str:
@@ -102,10 +111,10 @@ async def _edit_to_results(callback: CallbackQuery, options: list[TournamentOpti
 
 
 async def start_tournament_search(
-    message: Message, state: FSMContext, lang: str, session: AsyncSession, gender: Gender
+    message: Message, state: FSMContext, lang: str, session: AsyncSession, account: Account
 ) -> None:
     await state.update_data(category=None, place=None)
-    await _send_category_prompt(message, session, gender, lang)
+    await _send_category_prompt(message, session, account, lang)
     await state.set_state(TournamentSearch.waiting_category)
 
 
@@ -116,14 +125,18 @@ async def handle_category(
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
     gender = crud.gender_for_account_code(account.gender)
+    own_category = await crud.get_player_own_age_category(session, account.pzt_id)
     category = AgeCategory[callback_data.category]
 
     counts = await _category_counts(session, gender)
-    if not counts.get(category, 0):
+    eligible = category in categories_for_own_category(own_category)
+    if not eligible or not counts.get(category, 0):
         # Re-verified at tap time, not just at render time (CLAUDE.md step
         # 5.1: "Tapping it re-shows the four buttons; it must never lead
-        # to the place prompt and a dead end").
-        await callback.message.edit_reply_markup(reply_markup=category_keyboard(counts, lang))
+        # to the place prompt and a dead end" -- and step 8.3, PROBLEM 1a:
+        # a category below the player's own is refused the same way, in
+        # case a stale/crafted callback names one that isn't on screen).
+        await callback.message.edit_reply_markup(reply_markup=category_keyboard(counts, lang, own_category))
         await callback.answer()
         return
 
@@ -208,12 +221,11 @@ async def handle_change_place(callback: CallbackQuery, state: FSMContext, sessio
 async def handle_change_category(callback: CallbackQuery, state: FSMContext, session: AsyncSession) -> None:
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
-    gender = crud.gender_for_account_code(account.gender)
 
     # Clears the chosen category (CLAUDE.md step 5.1, "Navigation").
     await state.update_data(category=None, place=None)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await _send_category_prompt(callback.message, session, gender, lang)
+    await _send_category_prompt(callback.message, session, account, lang)
     await state.set_state(TournamentSearch.waiting_category)
     await callback.answer()
 

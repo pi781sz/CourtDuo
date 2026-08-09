@@ -61,5 +61,4 @@ async def handle_find_partner(callback: CallbackQuery, state: FSMContext, sessio
         logger.warning("Znajdź partnera tapped with no account: telegram_id=%s", callback.from_user.id)
         return
 
-    gender = crud.gender_for_account_code(account.gender)
-    await start_tournament_search(callback.message, state, lang, session, gender)
+    await start_tournament_search(callback.message, state, lang, session, account)

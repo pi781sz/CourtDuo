@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum, auto
 
+from bot.formatting import STATUS_EMOJI
 from bot.i18n import t
 from bot.tournament_search import label_for_tournament
 from core.text import display_name
@@ -121,11 +122,12 @@ def visible_entries(invitations: list[Invitation], viewer_pzt_id: str, today: da
     return entries
 
 
-def _entry_sort_key(entry: DebelEntry) -> tuple[int, float]:
-    # CLAUDE.md: "matched first, then everything else by most recent."
-    # "Most recent" is when the row last changed -- a fresh PENDING send
-    # and a just-answered REJECTED both count as "recent" the same way.
-    return (0 if entry.state is InvitationState.ACCEPTED else 1, -entry.updated_at.timestamp())
+def _entry_sort_key(entry: DebelEntry) -> float:
+    # CLAUDE.md step 8.3, PROBLEM 7: activity order, oldest first, newest
+    # last -- "activity" is when the row last changed (updated_at), not
+    # when it was created. A matched group only ever has the one surviving
+    # entry (_matched_only), so there is nothing left to tiebreak against.
+    return entry.updated_at.timestamp()
 
 
 def _collapse_repeats(entries: list[DebelEntry]) -> list[DebelEntry]:
@@ -168,11 +170,12 @@ class TournamentGroup:
 def group_by_tournament(
     invitations: list[Invitation], viewer_pzt_id: str, today: date, lang: str
 ) -> list[TournamentGroup]:
-    """Every visible entry, grouped and ordered exactly as CLAUDE.md's
-    "WHAT IT SHOWS" describes: tournaments by date_from ascending, entries
-    within a tournament matched-first-then-most-recent -- after collapsing
-    repeats between the same pair and dropping everything but a match, if
-    there is one.
+    """Every visible entry, grouped and ordered per CLAUDE.md's "WHAT IT
+    SHOWS": activity order, oldest first, newest last, so the most recent
+    thing sits at the bottom nearest the input box (step 8.3, PROBLEM 7) --
+    tournament groups by their own most recent activity, and lines within a
+    group the same way -- after collapsing repeats between the same pair
+    and dropping everything but a match, if there is one.
     """
     entries = visible_entries(invitations, viewer_pzt_id, today)
     tournaments_by_guid: dict[str, Tournament] = {
@@ -195,10 +198,12 @@ def group_by_tournament(
                 entries=group_entries,
             )
         )
-    # date.max sorts a tournament with no date_from at all (label_for_tournament
-    # already handles that case for the header text) to the end rather than
-    # crashing the comparison -- CLAUDE.md, "Never dead-end" in spirit.
-    groups.sort(key=lambda group: tournaments_by_guid[group.tournament_guid].date_from or date.max)
+    # "Their own most recent activity" -- each group's own latest entry,
+    # ascending, so the tournament with the most recently touched
+    # invitation ends up last (CLAUDE.md step 8.3, PROBLEM 7). Every group
+    # has at least one entry (it was only created because visible_entries
+    # put something in it), so max() never sees an empty sequence.
+    groups.sort(key=lambda group: max(entry.updated_at for entry in group.entries))
     return groups
 
 
@@ -219,9 +224,10 @@ def entry_line(entry: DebelEntry, lang: str) -> str:
     od:"), so a sent and a received line never read the same way.
     """
     name = display_name(entry.other_full_name)
+    emoji = STATUS_EMOJI[entry.state]
     if entry.state is InvitationState.ACCEPTED:
-        return t("moje_deble.matched", lang, name=name)
-    return t(_ENTRY_TEXT_KEYS[(entry.direction, entry.state)], lang, name=name)
+        return t("moje_deble.matched", lang, emoji=emoji, name=name)
+    return t(_ENTRY_TEXT_KEYS[(entry.direction, entry.state)], lang, emoji=emoji, name=name)
 
 
 def render_groups(groups: list[TournamentGroup], lang: str) -> str:

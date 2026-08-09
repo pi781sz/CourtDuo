@@ -31,8 +31,10 @@ from __future__ import annotations
 
 import logging
 
+from bot.formatting import STATUS_EMOJI
 from bot.i18n import t
 from core.text import display_name
+from db.models import InvitationState
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +75,13 @@ def sent_text(partner_name: str, tournament: str, lang: str) -> str:
     return "\n".join(
         (
             t("invitation.sent", lang),
-            t("invitation.status_pending", lang, name=display_name(partner_name), tournament=tournament),
+            t(
+                "invitation.status_pending",
+                lang,
+                emoji=STATUS_EMOJI[InvitationState.PENDING],
+                name=display_name(partner_name),
+                tournament=tournament,
+            ),
         )
     )
 
@@ -120,7 +128,13 @@ def invitation_text(inviter_full_name: str, tournament: str, lang: str) -> str:
 
 def matched_text(partner_full_name: str, tournament: str, lang: str) -> str:
     """The 🟢 line both sides see once an invitation is accepted."""
-    return t("invitation.status_matched", lang, name=display_name(partner_full_name), tournament=tournament)
+    return t(
+        "invitation.status_matched",
+        lang,
+        emoji=STATUS_EMOJI[InvitationState.ACCEPTED],
+        name=display_name(partner_full_name),
+        tournament=tournament,
+    )
 
 
 def accepted_inviter_text(invitee_full_name: str, invitee_gender: str | None, tournament: str, lang: str) -> str:
@@ -139,7 +153,12 @@ def rejected_invitee_text(
     """What the invitee sees after tapping Odrzuć — second person, so it
     inflects for the invitee's own gender."""
     return gendered(
-        "invitation.rejected_invitee", invitee_gender, lang, name=display_name(inviter_full_name), tournament=tournament
+        "invitation.rejected_invitee",
+        invitee_gender,
+        lang,
+        emoji=STATUS_EMOJI[InvitationState.REJECTED],
+        name=display_name(inviter_full_name),
+        tournament=tournament,
     )
 
 
@@ -147,7 +166,12 @@ def rejected_inviter_text(invitee_full_name: str, invitee_gender: str | None, to
     """What the inviter sees — third person about the invitee, so it
     inflects for the invitee's gender."""
     return gendered(
-        "invitation.rejected_inviter", invitee_gender, lang, name=display_name(invitee_full_name), tournament=tournament
+        "invitation.rejected_inviter",
+        invitee_gender,
+        lang,
+        emoji=STATUS_EMOJI[InvitationState.REJECTED],
+        name=display_name(invitee_full_name),
+        tournament=tournament,
     )
 
 
@@ -156,6 +180,11 @@ def not_attending_invitee_text(invitee_gender: str | None, lang: str) -> str:
 
 
 def not_attending_inviter_text(invitee_full_name: str, lang: str) -> str:
-    """Neutral 🟠, visually distinct from the 🔴 of a refusal — and not
-    gendered: "nie jedzie" is the same for everyone."""
-    return t("invitation.not_attending_inviter", lang, name=display_name(invitee_full_name))
+    """CLAUDE.md step 8.3, PROBLEM 2: 🔴, same as a refusal -- not gendered,
+    since "nie jedzie" is the same for everyone."""
+    return t(
+        "invitation.not_attending_inviter",
+        lang,
+        emoji=STATUS_EMOJI[InvitationState.NOT_ATTENDING],
+        name=display_name(invitee_full_name),
+    )

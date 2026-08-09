@@ -16,6 +16,7 @@
     "error_try_later": "Wystąpił błąd. Spróbuj ponownie później."
   },
   "tournament_search": {
+    "category_heading": "Znajdź partnera",
     "ask_category": "Wybierz kategorię wiekową.",
     "category_selected": "Wybrana kategoria wiekowa: {category}",
     "category_short": {
@@ -45,29 +46,29 @@
     "confirm_cancel_button": "Anuluj",
     "send_cancelled": "Zaproszenie nie zostało wysłane.",
     "sent": "Zaproszenie zostało wysłane. Czekaj na odpowiedź.",
-    "status_pending": "⚪ {name} — {tournament}",
-    "status_matched": "🟢 Partner: {name} — {tournament}",
+    "status_pending": "{emoji} {name} — {tournament}",
+    "status_matched": "{emoji} Partner: {name} — {tournament}",
     "received": "{name} zaprasza Cię do gry podwójnej.",
-    "accept_button": "Zatwierdź",
-    "reject_button": "Odrzuć",
-    "not_attending_button": "Nie jadę na ten turniej",
+    "accept_button": "✅ Zatwierdź",
+    "reject_button": "❌ Odrzuć",
+    "not_attending_button": "⛔ Nie jadę na ten turniej",
     "accepted_inviter": {
       "M": "{name} przyjął zaproszenie.",
       "W": "{name} przyjęła zaproszenie."
     },
     "rejected_invitee": {
-      "M": "🔴 Odrzuciłeś zaproszenie od {name} — {tournament}.",
-      "W": "🔴 Odrzuciłaś zaproszenie od {name} — {tournament}."
+      "M": "{emoji} Odrzuciłeś zaproszenie od {name} — {tournament}.",
+      "W": "{emoji} Odrzuciłaś zaproszenie od {name} — {tournament}."
     },
     "rejected_inviter": {
-      "M": "🔴 {name} odrzucił zaproszenie — {tournament}.",
-      "W": "🔴 {name} odrzuciła zaproszenie — {tournament}."
+      "M": "{emoji} {name} odrzucił zaproszenie — {tournament}.",
+      "W": "{emoji} {name} odrzuciła zaproszenie — {tournament}."
     },
     "not_attending_invitee": {
       "M": "Odpowiedziałeś, że nie jedziesz na ten turniej.",
       "W": "Odpowiedziałaś, że nie jedziesz na ten turniej."
     },
-    "not_attending_inviter": "🟠 {name} nie jedzie na ten turniej.",
+    "not_attending_inviter": "{emoji} {name} nie jedzie na ten turniej.",
     "partner_found_elsewhere": "Ten zawodnik znalazł już partnera.",
     "no_longer_valid": "To zaproszenie jest już nieaktualne.",
     "already_answered": "Na to zaproszenie już odpowiedziano.",
@@ -87,8 +88,10 @@
     "candidate_no_ranking": "{name} — brak rankingu w bazie",
     "self_invite": "Nie możesz zaprosić samego siebie. Wpisz imię i nazwisko innej osoby.",
     "gender_mismatch": "Ta osoba gra w innej kategorii płci. Wpisz imię i nazwisko innej osoby.",
+    "invitee_too_old": "{name} nie może grać w kategorii {category}.\nWpisz imię i nazwisko innej osoby.",
     "inviter_already_matched": "Masz już partnera na ten turniej: {name}.",
     "invitee_already_matched": "{name} ma już partnera na ten turniej.\nWpisz imię i nazwisko innej osoby.",
+    "already_answered": "Ta osoba ({name}) już odpowiedziała na zaproszenie na ten turniej.\nWpisz imię i nazwisko innej osoby.",
     "pending_invitation_exists": "Zaproszenie do {name} zostało już wysłane. Czekaj na odpowiedź.",
     "max_pending_reached": "Masz już 3 oczekujące zaproszenia na ten turniej. Poczekaj na odpowiedź, zanim zaprosisz kogoś nowego.",
     "cannot_send_invitation": "Nie możesz teraz wysłać zaproszenia. Spróbuj ponownie później.",
@@ -102,18 +105,19 @@
     "unknown_club": "brak klubu",
     "find_partner_button": "Znajdź partnera",
     "moje_deble_button": "Moje deble",
-    "menu_button": "Menu",
+    "menu_button": "🔵 Menu",
     "menu_prompt": "Co chcesz zrobić?"
   },
   "moje_deble": {
+    "heading": "Moje deble",
     "empty": "Nie masz jeszcze żadnych zaproszeń.",
     "not_registered": "Zacznij od komendy /start, aby się zarejestrować.",
-    "matched": "🟢 Gracie razem: {name}",
-    "sent_pending": "🟠 Wysłane do: {name}",
-    "sent_rejected": "🔴 Odmowa: {name}",
-    "sent_not_attending": "🔴 Nie jedzie: {name}",
-    "received_pending": "🟠 Zaproszenie od: {name}",
-    "received_rejected": "🔴 Odrzucone: {name}",
-    "received_not_attending": "🔴 Nie jadę: {name}"
+    "matched": "{emoji} Gracie razem: {name}",
+    "sent_pending": "{emoji} Wysłane do: {name}",
+    "sent_rejected": "{emoji} Odmowa: {name}",
+    "sent_not_attending": "{emoji} Nie jedzie: {name}",
+    "received_pending": "{emoji} Zaproszenie od: {name}",
+    "received_rejected": "{emoji} Odrzucone: {name}",
+    "received_not_attending": "{emoji} Nie jadę: {name}"
   }
 }

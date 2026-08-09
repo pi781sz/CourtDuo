@@ -19,7 +19,13 @@ from bot.keyboards.tournament_search import (
     none_eligible_keyboard,
     results_keyboard,
 )
-from bot.tournament_search import CATEGORY_ORDER, MAX_RESULTS, TournamentOption, cap_results
+from bot.tournament_search import (
+    CATEGORY_ORDER,
+    MAX_RESULTS,
+    TournamentOption,
+    cap_results,
+    categories_for_own_category,
+)
 
 _NAV_BUTTON_COUNT = 2  # "Zmień miejscowość" + "Zmień kategorię wiekową"
 
@@ -93,7 +99,7 @@ def test_none_eligible_keyboard_offers_menu_too():
     markup = none_eligible_keyboard("pl")
 
     texts = _all_button_texts(markup)
-    assert "Menu" in texts
+    assert "🔵 Menu" in texts
     assert MenuCallback.__prefix__ in _callback_prefixes(markup)
 
 
@@ -127,3 +133,29 @@ def test_no_pagination_callback_classes_remain():
     assert not hasattr(keyboards_module, "TournamentPageCallback")
     assert ChangePlaceCallback is not None
     assert ChangeCategoryCallback is not None
+
+
+def test_category_keyboard_filters_by_own_category():
+    # CLAUDE.md step 8.3, PROBLEM 1a: a U16 player only sees U16/U18 --
+    # U12/U14 are hidden entirely, not shown disabled.
+    from db.models import AgeCategory
+
+    counts = {category: 1 for category in CATEGORY_ORDER}
+    markup = category_keyboard(counts, "pl", AgeCategory.KADECI)
+
+    texts = _all_button_texts(markup)
+    assert "U12" not in texts
+    assert "U14" not in texts
+    assert "U16" in texts
+    assert "U18" in texts
+
+
+def test_category_keyboard_with_no_own_category_shows_all_four():
+    from db.models import AgeCategory
+
+    counts = {category: 1 for category in CATEGORY_ORDER}
+    markup = category_keyboard(counts, "pl", None)
+
+    texts = _all_button_texts(markup)
+    assert texts[:4] == ["U12", "U14", "U16", "U18"]
+    assert categories_for_own_category(AgeCategory.SKRZATY) == CATEGORY_ORDER

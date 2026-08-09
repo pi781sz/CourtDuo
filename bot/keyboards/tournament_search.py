@@ -16,8 +16,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.i18n import t
 from bot.keyboards.navigation import FindPartnerCallback, MenuCallback, MojeDebleCallback
 from bot.tournament_search import (
-    CATEGORY_ORDER,
     TournamentOption,
+    categories_for_own_category,
     category_is_available,
     category_short_label,
     tournament_label,
@@ -45,9 +45,15 @@ class ChangeCategoryCallback(CallbackData, prefix="tchgcat"):
     pass
 
 
-def category_keyboard(counts: dict[AgeCategory, int], lang: str) -> InlineKeyboardMarkup:
+def category_keyboard(
+    counts: dict[AgeCategory, int], lang: str, own_category: AgeCategory | None = None
+) -> InlineKeyboardMarkup:
+    """CLAUDE.md step 8.3, PROBLEM 1a: only offers categories the player is
+    eligible for (>= their own -- see bot.tournament_search.
+    categories_for_own_category); `own_category=None` offers all four,
+    used when it cannot be derived."""
     builder = InlineKeyboardBuilder()
-    for category in CATEGORY_ORDER:
+    for category in categories_for_own_category(own_category):
         short = category_short_label(category, lang)
         if category_is_available(counts, category):
             text = short
