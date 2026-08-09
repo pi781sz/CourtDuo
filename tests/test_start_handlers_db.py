@@ -39,6 +39,12 @@ _NOW = datetime(2026, 8, 9, 12, 0, tzinfo=timezone.utc)
 def _make_message() -> MagicMock:
     message = MagicMock()
     message.from_user.id = _TELEGRAM_ID
+    # A real string, not an auto-generated MagicMock attribute: since step
+    # 10.2, handle_start passes this straight through to bind_viewer, which
+    # persists it as AccountViewer.viewer_display_name -- a real DB column,
+    # not a mock. Tests that care about a specific captured name still
+    # override it explicitly (see the viewer-binding tests below).
+    message.from_user.full_name = "Testowy Użytkownik"
     message.answer = AsyncMock()
     return message
 
@@ -93,6 +99,30 @@ async def test_returning_player_also_gets_the_persistent_keyboard_on_start(db_se
     assert len(markups) == 1
     rows = [[button.text for button in row] for row in markups[0].keyboard]
     assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"]]
+
+
+async def test_returning_player_allowlisted_for_viewers_gets_the_fourth_podglad_button(
+    db_session: AsyncSession, monkeypatch
+):
+    # CLAUDE.md step 10.2, PROBLEM 4: only entitlements.can_use_viewers
+    # accounts get the fourth row -- everyone else's keyboard is unchanged.
+    monkeypatch.setenv("VIEWER_ALLOWLIST_PZT_IDS", "STR0002")
+    db_session.add(Player(pzt_id="STR0002", full_name="Testowy Gracz", club=None, age_category=None, gender=None))
+    await db_session.flush()
+    db_session.add(
+        Account(telegram_id=_TELEGRAM_ID, pzt_id="STR0002", full_name="Testowy Gracz", gender="M", lang="pl")
+    )
+    await db_session.flush()
+
+    message = _make_message()
+    state = _make_state()
+
+    await handle_start(message, state, db_session, _make_bot(), CommandObject())
+
+    markups = _reply_keyboard_calls(message)
+    assert len(markups) == 1
+    rows = [[button.text for button in row] for row in markups[0].keyboard]
+    assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"], ["Podgląd konta"]]
 
 
 async def _add_watched_account(session: AsyncSession, pzt_id: str, telegram_id: int, full_name: str = "Nowak Adam") -> Account:
@@ -271,3 +301,25 @@ async def test_completing_registration_also_attaches_the_persistent_keyboard(db_
     assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"]]
     assert markups[0].is_persistent is True
     assert markups[0].resize_keyboard is True
+
+
+async def test_completing_registration_allowlisted_for_viewers_gets_the_fourth_podglad_button(
+    db_session: AsyncSession, monkeypatch
+):
+    monkeypatch.setenv("VIEWER_ALLOWLIST_PZT_IDS", "NEW0002")
+    db_session.add(Player(pzt_id="NEW0002", full_name="Nowak Testowy", club=None, age_category=None, gender=None))
+    await db_session.flush()
+    db_session.add(Ranking(player_pzt_id="NEW0002", ranking_list=RankingList.M14, position=1, year=2026, month=8))
+    await db_session.flush()
+
+    message = _make_message()
+    message.text = "NEW0002"
+    state = _make_state()
+    await state.set_state(Registration.waiting_pzt_id)
+
+    await handle_pzt_id(message, state, db_session, _make_bot())
+
+    markups = _reply_keyboard_calls(message)
+    assert len(markups) == 1
+    rows = [[button.text for button in row] for row in markups[0].keyboard]
+    assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"], ["Podgląd konta"]]

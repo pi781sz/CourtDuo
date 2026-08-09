@@ -24,23 +24,23 @@ def _viewer(viewer_id: int) -> AccountViewer:
     return AccountViewer(id=viewer_id, account_id=1, viewer_telegram_id=1000 + viewer_id)
 
 
-def test_podglad_menu_lists_one_revoke_button_per_viewer_plus_a_create_button():
+def test_podglad_menu_lists_one_revoke_button_per_viewer_plus_a_share_button():
     markup = podglad_menu_keyboard([_viewer(1), _viewer(2)], "pl")
     buttons = _buttons(markup)
 
     assert [button.text for button in buttons] == [
-        "Odwołaj dostęp #1",
-        "Odwołaj dostęp #2",
-        "Utwórz zaproszenie do podglądu",
+        "Skasuj dostęp #1",
+        "Skasuj dostęp #2",
+        "Udostępnij podgląd mojego konta",
     ]
     assert buttons[-1].callback_data == ViewerCreateInviteCallback().pack()
 
 
-def test_podglad_menu_hides_the_create_button_at_the_three_viewer_cap():
+def test_podglad_menu_hides_the_share_button_at_the_three_viewer_cap():
     markup = podglad_menu_keyboard([_viewer(1), _viewer(2), _viewer(3)], "pl")
     buttons = _buttons(markup)
 
-    assert [button.text for button in buttons] == ["Odwołaj dostęp #1", "Odwołaj dostęp #2", "Odwołaj dostęp #3"]
+    assert [button.text for button in buttons] == ["Skasuj dostęp #1", "Skasuj dostęp #2", "Skasuj dostęp #3"]
 
 
 def test_revoke_buttons_carry_the_viewer_rows_own_id_not_the_display_index():
@@ -50,11 +50,11 @@ def test_revoke_buttons_carry_the_viewer_rows_own_id_not_the_display_index():
     assert button.callback_data == ViewerRevokeCallback(viewer_id=42).pack()
 
 
-def test_podglad_menu_with_no_viewers_is_just_the_create_button():
+def test_podglad_menu_with_no_viewers_is_just_the_share_button():
     markup = podglad_menu_keyboard([], "pl")
     buttons = _buttons(markup)
 
-    assert [button.text for button in buttons] == ["Utwórz zaproszenie do podglądu"]
+    assert [button.text for button in buttons] == ["Udostępnij podgląd mojego konta"]
 
 
 def test_viewer_chooser_keyboard_shows_reordered_display_names():

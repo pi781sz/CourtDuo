@@ -46,7 +46,7 @@ def podglad_menu_keyboard(viewers: list[AccountViewer], lang: str) -> InlineKeyb
             callback_data=ViewerRevokeCallback(viewer_id=viewer.id),
         )
     if len(viewers) < 3:
-        builder.button(text=t("viewer.create_button", lang), callback_data=ViewerCreateInviteCallback())
+        builder.button(text=t("viewer.share_button", lang), callback_data=ViewerCreateInviteCallback())
     builder.adjust(1)
     return builder.as_markup()
 

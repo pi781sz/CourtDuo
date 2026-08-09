@@ -2,14 +2,13 @@
 viewer opens (CLAUDE.md, "Identity", step 10 -- allowlisted test
 feature).
 
-/podglad is a plain slash command, deliberately not added to the
-persistent reply keyboard: CLAUDE.md's "Navigation" section pins that
-keyboard to exactly three fixed actions ("the reply keyboard only ever
-carries these three fixed actions"), and this is a test feature gated by
-an allowlist most accounts will never satisfy -- making the reply
-keyboard allowlist-aware would be a far bigger change than this feature
-warrants. /moje_deble already proves a command is a legitimate,
-keyboard-independent entry point on its own.
+/podglad is still a plain slash command -- but as of step 10.2 it is also
+one tap away via the persistent reply keyboard's fourth row, "Podgląd
+konta" (bot.keyboards.navigation.persistent_menu_keyboard's `show_podglad`
+flag), shown only to accounts entitlements.can_use_viewers allows. The
+label handler below (handle_podglad_button) opens the exact same
+_render_menu screen as the command; everyone else's keyboard stays the
+three fixed actions it always was.
 
 Every handler here re-checks entitlements.can_use_viewers itself rather
 than trusting that the menu wasn't shown to begin with -- the same
@@ -27,12 +26,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.i18n import t
+from bot.i18n import all_translations, t
 from bot.keyboards.invite_friend import share_keyboard
 from bot.keyboards.navigation import viewer_menu_keyboard
 from bot.keyboards.viewers import (
@@ -47,7 +46,7 @@ from bot.moje_deble import group_by_tournament, render_groups
 from bot.viewers import create_invite_token, invite_link
 from core.text import display_name
 from db import crud
-from db.models import Account
+from db.models import Account, AccountViewer
 from entitlements import can_use_viewers
 
 router = Router(name="viewers")
@@ -60,15 +59,24 @@ def _warsaw_today():
     return datetime.now(timezone.utc).astimezone(_WARSAW_TZ).date()
 
 
+def _viewer_list_line(viewer: AccountViewer, index: int, lang: str) -> str:
+    """CLAUDE.md step 10.2, PROBLEM 3: show who a grant belongs to, not
+    just a numbered slot -- the viewer's own Telegram display name,
+    captured at bind time (bot.viewers.bind_viewer). Falls back to the
+    plain numbered form for a grant made before that was captured, rather
+    than showing a raw Telegram id."""
+    date = viewer.granted_at.strftime("%d.%m.%Y")
+    if viewer.viewer_display_name:
+        return t("viewer.list_item_named", lang, index=index, name=viewer.viewer_display_name, date=date)
+    return t("viewer.list_item", lang, index=index, date=date)
+
+
 async def _render_menu(message: Message, session: AsyncSession, account: Account, lang: str) -> None:
     viewers = await crud.get_active_viewers_for_account(session, account.id)
     lines = [t("viewer.podglad_heading", lang), "", t("viewer.podglad_intro", lang)]
     if viewers:
         lines.append("")
-        lines.extend(
-            t("viewer.list_item", lang, index=index, date=viewer.granted_at.strftime("%d.%m.%Y"))
-            for index, viewer in enumerate(viewers, start=1)
-        )
+        lines.extend(_viewer_list_line(viewer, index, lang) for index, viewer in enumerate(viewers, start=1))
     else:
         lines.append("")
         lines.append(t("viewer.list_empty", lang))
@@ -80,6 +88,20 @@ async def _render_menu(message: Message, session: AsyncSession, account: Account
 
 @router.message(Command("podglad"))
 async def handle_podglad(message: Message, session: AsyncSession) -> None:
+    account = await crud.get_account_by_telegram_id(session, message.from_user.id)
+    if account is None or not can_use_viewers(account):
+        return
+    await _render_menu(message, session, account, lang_for(account))
+
+
+@router.message(F.text.in_(all_translations("common.podglad_button")))
+async def handle_podglad_button(message: Message, session: AsyncSession) -> None:
+    """CLAUDE.md step 10.2, PROBLEM 4: the persistent reply keyboard's
+    "Podgląd konta" label, shown only to accounts entitlements.can_use_viewers
+    allows -- opens the exact same screen as the /podglad command. Silent,
+    no-reply refusal for anyone else, same as the command itself: a
+    non-allowlisted or unregistered account must never learn the feature
+    exists (CLAUDE.md step 10: "Everyone else's bot is unchanged")."""
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     if account is None or not can_use_viewers(account):
         return

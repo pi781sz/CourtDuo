@@ -51,6 +51,12 @@ class AccountViewer(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_id: Mapped[int] = mapped_column(Integer, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False)
     viewer_telegram_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # The viewer's own Telegram display name (User.full_name), captured once
+    # at bind time (bot.viewers.bind_viewer) so the Podgląd list can show
+    # who has access -- CLAUDE.md step 10.2. Nullable because grants made
+    # before this column existed never captured one; the list falls back to
+    # the plain numbered form for those.
+    viewer_display_name: Mapped[str | None] = mapped_column(String, nullable=True)
     granted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

@@ -128,7 +128,8 @@
     "unknown_club": "brak klubu",
     "find_partner_button": "Znajdź partnera",
     "moje_deble_button": "Moje deble",
-    "invite_button": "Zaproś na CourtDuo"
+    "invite_button": "Zaproś na CourtDuo",
+    "podglad_button": "Podgląd konta"
   },
   "moje_deble": {
     "heading": "Moje deble",
@@ -160,11 +161,12 @@
     "podglad_intro": "Możesz udostępnić maksymalnie 3 osobom. Osoba z dostępem widzi Twoje powiadomienia i Twoje deble, ale nie może niczego wysyłać ani odpowiadać za Ciebie.",
     "list_empty": "Nikt nie ma jeszcze dostępu do podglądu.",
     "list_item": "{index}. dostęp od {date}",
-    "create_button": "Utwórz zaproszenie do podglądu",
-    "revoke_button": "Odwołaj dostęp #{index}",
+    "list_item_named": "{index}. {name} — dostęp od {date}",
+    "share_button": "Udostępnij podgląd mojego konta",
+    "revoke_button": "Skasuj dostęp #{index}",
     "limit_reached": "Masz już maksymalną liczbę 3 osób z dostępem podglądu. Odwołaj jedną z nich, aby dodać nową.",
-    "invite_created": "Wyślij link z dostępem przez:\n\nLink jest jednorazowy i ważny 24 godziny.",
-    "invite_share_text": "Zapraszam Cię do podglądu moich zaproszeń w CourtDuo. {link}",
+    "invite_created": "Wyślij link z dostępem\n\nLink jest jednorazowy i ważny 24 godziny.",
+    "invite_share_text": "Zapraszam Cię do podglądu mojego konta CourtDuo. Link jednorazowy i ważny 24 godziny. {link}",
     "revoked": "Odwołano dostęp.",
     "player_notified_grant": "{telegram_name} ma teraz dostęp do podglądu Twojego konta CourtDuo.",
     "bound": {
