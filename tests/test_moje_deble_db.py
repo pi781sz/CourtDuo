@@ -22,7 +22,11 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.handlers.moje_deble import handle_moje_deble_button, handle_moje_deble_command
+from bot.handlers.moje_deble import (
+    handle_moje_deble_button,
+    handle_moje_deble_button_press,
+    handle_moje_deble_command,
+)
 from bot.moje_deble import group_by_tournament, render_groups
 from db import crud
 from db.models import Account, AgeCategory, Event, Gender, Invitation, InvitationState, Player, PlayType, Tournament
@@ -197,12 +201,12 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
     assert lines[0] == "Moje deble"
     assert lines[1] == ""
     assert lines[2] == "WTK Uniejów - " + f"{earlier:%d.%m.%Y}"
-    assert lines[3] == "🟢 Gracie razem: Jagoda Testowa"
+    assert lines[3] == "🟢 Jagoda Testowa — gracie razem"
     assert "" in lines[4:]  # blank line separates the two tournament blocks
     assert f"WTK Zielona Góra - {later:%d.%m.%Y}" in lines
-    assert "🟠 Wysłane do: Maja Testowa" in lines
-    assert "🔴 Odmowa: Bartosz Testowy" in lines
-    assert "🔴 Nie jedzie: Wiktoria Testowa" in lines
+    assert "🟠 Maja Testowa — wysłane" in lines
+    assert "🔴 Bartosz Testowy — odmowa" in lines
+    assert "🔴 Wiktoria Testowa — nie jedzie" in lines
 
     markup = _markups(message)[0]
     assert _button_texts(markup) == ["Znajdź partnera"]
@@ -224,22 +228,17 @@ async def test_received_pending_reads_differently_and_is_actionable(db_session: 
     assert len(texts) == 2
     summary_text = texts[0]
     assert "Karol Testowy" in summary_text
-    # Not the "Wysłane do" sent-pending wording -- this one was received.
-    assert "Wysłane do: Karol Testowy" not in summary_text
+    # Not the sent-pending wording -- this one was received.
+    assert "Karol Testowy — wysłane" not in summary_text
     assert _button_texts(_markups(message)[0]) == ["Znajdź partnera"]
 
     follow_up_text = texts[1]
-    assert follow_up_text == "🟠 Zaproszenie od: Karol Testowy"
+    assert follow_up_text == "🟠 Karol Testowy — zaprasza"
 
     markup = _markups(message)[1]
     button_texts = _button_texts(markup)
-    # CLAUDE.md step 8.3, PROBLEM 3: a fourth Menu button alongside the
-    # three answers.
-    assert len(button_texts) == 4
-    assert any("Zatwierdź" in text for text in button_texts)
-    assert any("Odrzuć" in text for text in button_texts)
-    assert any("Nie jadę na ten turniej" in text for text in button_texts)
-    assert any("Menu" in text for text in button_texts)
+    # CLAUDE.md step 8.4: exactly the three answers, no Menu button.
+    assert button_texts == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
 
 
 async def test_one_follow_up_message_per_pending_received_invitation(db_session: AsyncSession):
@@ -262,7 +261,7 @@ async def test_one_follow_up_message_per_pending_received_invitation(db_session:
     assert any("Karol Testowy" in text for text in follow_ups)
     assert any("Ola Testowa" in text for text in follow_ups)
     for markup in _markups(message)[1:]:
-        assert len(_button_texts(markup)) == 4
+        assert len(_button_texts(markup)) == 3
 
 
 # --- WHAT IT HIDES: finished tournaments, day boundary --------------------------
@@ -366,3 +365,23 @@ async def test_moje_deble_button_clears_itself_and_renders_the_same_view(db_sess
     callback.answer.assert_awaited_once()
     assert callback.message.answer.await_count == 1
     assert callback.message.answer.call_args.args[0] == "Nie masz jeszcze żadnych zaproszeń."
+
+
+# --- Reachable via the persistent-keyboard label too (CLAUDE.md step 8.4) -------
+
+
+async def test_moje_deble_button_press_renders_the_same_view(db_session: AsyncSession):
+    await _add_user(db_session, "MDB061", "Testowa Anna", telegram_id=910061)
+
+    message = _make_message(910061)
+    await handle_moje_deble_button_press(message, db_session)
+
+    assert _texts(message) == ["Nie masz jeszcze żadnych zaproszeń."]
+
+
+async def test_moje_deble_button_press_before_registration_does_not_crash(db_session: AsyncSession):
+    message = _make_message(910062)
+
+    await handle_moje_deble_button_press(message, db_session)
+
+    assert _texts(message) == ["Zacznij od komendy /start, aby się zarejestrować."]

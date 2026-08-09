@@ -1,4 +1,5 @@
 from .invitations import router as invitations_router
+from .invite_friend import router as invite_friend_router
 from .moje_deble import router as moje_deble_router
 from .navigation import router as navigation_router
 from .partner_selection import router as partner_selection_router
@@ -12,4 +13,5 @@ __all__ = [
     "invitations_router",
     "navigation_router",
     "moje_deble_router",
+    "invite_friend_router",
 ]

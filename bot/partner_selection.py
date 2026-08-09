@@ -31,7 +31,6 @@ from bot.i18n import t
 from bot.invitation_send import start_invitation_send
 from bot.invitation_text import already_invited_text
 from bot.keyboards.invitations import invitation_answer_keyboard
-from bot.keyboards.navigation import terminal_keyboard
 from bot.keyboards.tournament_search import category_keyboard
 from bot.states import PartnerSelection, TournamentSearch
 from bot.tournament_search import category_short_label, label_for_tournament
@@ -261,13 +260,6 @@ _CHECK_FAILURE_MESSAGE_KEYS: dict[CheckFailure, str] = {
     CheckFailure.MAX_PENDING_REACHED: "partner_selection.max_pending_reached",
 }
 
-# CLAUDE.md build order step 8.2: which of the refusals above end the
-# attempt (get [Menu]) versus leave the player retyping a name in the same
-# flow (get no navigation button -- the message itself says "Wpisz imię i
-# nazwisko innej osoby."). PENDING_INVITATION_EXISTS and MAX_PENDING_REACHED
-# tell the player to wait instead, so there is nothing left to type here.
-_CHECK_FAILURE_TERMINAL = frozenset({CheckFailure.PENDING_INVITATION_EXISTS, CheckFailure.MAX_PENDING_REACHED})
-
 
 async def find_incoming_pending_invitation(
     session: AsyncSession, account: Account, tournament: Tournament, candidate: Player
@@ -308,15 +300,13 @@ async def handle_partner_candidate(
 
     failure = await run_pre_invitation_checks(session, account, tournament, candidate)
     if failure is not None:
-        reply_markup = terminal_keyboard(lang) if failure in _CHECK_FAILURE_TERMINAL else None
         await message.answer(
             t(
                 _CHECK_FAILURE_MESSAGE_KEYS[failure],
                 lang,
                 name=display_name(candidate.full_name),
                 category=category_short_label(tournament.age_category, lang),
-            ),
-            reply_markup=reply_markup,
+            )
         )
         return
 
@@ -326,7 +316,7 @@ async def handle_partner_candidate(
     # call is what keeps a player from reaching a confirmation screen they
     # are not entitled to act on.
     if not await can_send_invitation(account, tournament):
-        await message.answer(t("partner_selection.cannot_send_invitation", lang), reply_markup=terminal_keyboard(lang))
+        await message.answer(t("partner_selection.cannot_send_invitation", lang))
         return
 
     await start_invitation_send(message, state, lang, session, account, tournament, candidate)
@@ -351,8 +341,7 @@ async def start_partner_selection(
         )
         partner = await crud.get_player_by_pzt_id(session, partner_pzt_id)
         await message.answer(
-            t("partner_selection.inviter_already_matched", lang, name=display_name(partner.full_name)),
-            reply_markup=terminal_keyboard(lang),
+            t("partner_selection.inviter_already_matched", lang, name=display_name(partner.full_name))
         )
 
         # No name to ask for -- CLAUDE.md, "Never dead-end": offer a way

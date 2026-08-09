@@ -521,7 +521,7 @@ async def test_already_invited_by_candidate_redirects_to_answering_instead_of_a_
     assert any("Ola Testowa" in text for text in texts)
     markup = message.answer.call_args.kwargs["reply_markup"]
     button_texts = [button.text for row in markup.inline_keyboard for button in row]
-    assert button_texts == ["✅ Zatwierdź", "❌ Odrzuć", "⛔ Nie jadę na ten turniej", "🔵 Menu"]
+    assert button_texts == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
     # Still just the one invitation -- no second one was created, and no
     # confirmation screen was shown (the state stays wherever it started).
     assert await crud.count_pending_outgoing_invitations(db_session, "INV001", tournament.guid) == 0

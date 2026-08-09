@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.attempt_limiter import FailedAttemptLimiter
 from bot.handlers.tournament_search import start_tournament_search
 from bot.i18n import t
+from bot.keyboards.navigation import persistent_menu_keyboard
 from bot.lang import DEFAULT_LANG, lang_for
 from bot.registration import RegistrationOutcome, register_by_pzt_id
 from bot.states import Registration
@@ -46,13 +47,19 @@ async def handle_start(message: Message, state: FSMContext, session: AsyncSessio
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     if account is not None:
         # CLAUDE.md scenario 3: returning player skips registration
-        # entirely, straight to tournament search.
-        await start_tournament_search(message, state, lang_for(account), session, account)
+        # entirely, straight to tournament search. CLAUDE.md step 8.4: the
+        # persistent reply keyboard is attached here, on /start, so it is
+        # already present by the time the category screen shows up.
+        lang = lang_for(account)
+        await message.answer(t("start.greeting_returning", lang), reply_markup=persistent_menu_keyboard(lang))
+        await start_tournament_search(message, state, lang, session, account)
         return
 
-    # CLAUDE.md step 8.2: mid-flow -- the next thing expected is typing a
-    # PZT id, and there is no account yet for [Menu] to do anything with.
-    await message.answer(t("start.greeting", DEFAULT_LANG))
+    # CLAUDE.md step 8.4: the persistent reply keyboard is attached on this
+    # very first message of a session, before there is even an account --
+    # its "Zaproś na CourtDuo" label needs none, and the other two silently
+    # no-op if tapped before registration finishes.
+    await message.answer(t("start.greeting", DEFAULT_LANG), reply_markup=persistent_menu_keyboard(DEFAULT_LANG))
     await message.answer(t("registration.ask_pzt_id", DEFAULT_LANG))
     await state.set_state(Registration.waiting_pzt_id)
 

@@ -18,9 +18,11 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.handlers import (
     invitations_router,
+    invite_friend_router,
     moje_deble_router,
     navigation_router,
     partner_selection_router,
@@ -35,24 +37,41 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispatcher:
+    """Assembles the Dispatcher: one DbSessionMiddleware, every feature
+    router. Split out from main() so tests can feed real Updates through
+    the exact same router wiring and ordering production uses (see
+    tests/test_persistent_menu_routing.py) rather than duplicating it.
+    """
+    dispatcher = Dispatcher(storage=MemoryStorage())
+
+    db_middleware = DbSessionMiddleware(session_factory)
+    dispatcher.message.middleware(db_middleware)
+    dispatcher.callback_query.middleware(db_middleware)
+
+    # navigation/moje_deble/invite_friend registered first: CLAUDE.md step
+    # 8.4's persistent reply keyboard adds exact-text message handlers
+    # ("Znajdź partnera", "Moje deble", "Zaproś na CourtDuo") that must win
+    # against a tap arriving while the player is mid another flow -- e.g.
+    # typing a place or a partner name -- before those state-scoped
+    # handlers ever see the update.
+    dispatcher.include_router(navigation_router)
+    dispatcher.include_router(moje_deble_router)
+    dispatcher.include_router(invite_friend_router)
+    dispatcher.include_router(start_router)
+    dispatcher.include_router(tournament_search_router)
+    dispatcher.include_router(partner_selection_router)
+    dispatcher.include_router(invitations_router)
+    return dispatcher
+
+
 async def main() -> None:
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise RuntimeError("BOT_TOKEN is not set")
 
     bot = Bot(token=token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-    dispatcher = Dispatcher(storage=MemoryStorage())
-
-    db_middleware = DbSessionMiddleware()
-    dispatcher.message.middleware(db_middleware)
-    dispatcher.callback_query.middleware(db_middleware)
-
-    dispatcher.include_router(start_router)
-    dispatcher.include_router(tournament_search_router)
-    dispatcher.include_router(partner_selection_router)
-    dispatcher.include_router(invitations_router)
-    dispatcher.include_router(navigation_router)
-    dispatcher.include_router(moje_deble_router)
+    dispatcher = build_dispatcher()
 
     try:
         await bot.delete_webhook(drop_pending_updates=True)

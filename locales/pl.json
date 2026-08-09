@@ -49,9 +49,9 @@
     "status_pending": "{emoji} {name} — {tournament}",
     "status_matched": "{emoji} Partner: {name} — {tournament}",
     "received": "{name} zaprasza Cię do gry podwójnej.",
-    "accept_button": "✅ Zatwierdź",
-    "reject_button": "❌ Odrzuć",
-    "not_attending_button": "⛔ Nie jadę na ten turniej",
+    "accept_button": "Zatwierdź",
+    "reject_button": "Odrzuć",
+    "not_attending_button": "Nie jadę na ten turniej",
     "accepted_inviter": {
       "M": "{name} przyjął zaproszenie.",
       "W": "{name} przyjęła zaproszenie."
@@ -105,19 +105,25 @@
     "unknown_club": "brak klubu",
     "find_partner_button": "Znajdź partnera",
     "moje_deble_button": "Moje deble",
-    "menu_button": "🔵 Menu",
-    "menu_prompt": "Co chcesz zrobić?"
+    "invite_button": "Zaproś na CourtDuo"
   },
   "moje_deble": {
     "heading": "Moje deble",
     "empty": "Nie masz jeszcze żadnych zaproszeń.",
     "not_registered": "Zacznij od komendy /start, aby się zarejestrować.",
-    "matched": "{emoji} Gracie razem: {name}",
-    "sent_pending": "{emoji} Wysłane do: {name}",
-    "sent_rejected": "{emoji} Odmowa: {name}",
-    "sent_not_attending": "{emoji} Nie jedzie: {name}",
-    "received_pending": "{emoji} Zaproszenie od: {name}",
-    "received_rejected": "{emoji} Odrzucone: {name}",
-    "received_not_attending": "{emoji} Nie jadę: {name}"
+    "matched": "{emoji} {name} — gracie razem",
+    "sent_pending": "{emoji} {name} — wysłane",
+    "sent_rejected": "{emoji} {name} — odmowa",
+    "sent_not_attending": "{emoji} {name} — nie jedzie",
+    "received_pending": "{emoji} {name} — zaprasza",
+    "received_rejected": "{emoji} {name} — odrzucone",
+    "received_not_attending": "{emoji} {name} — nie jadę"
+  },
+  "invite_friend": {
+    "message": "Zaproś znajomego do CourtDuo! Wybierz, jak chcesz wysłać zaproszenie.",
+    "share_text": "Cześć! Szukam partnera do debla na turnieje PZT. Dołącz do CourtDuo: {link}",
+    "whatsapp_button": "WhatsApp",
+    "telegram_button": "Telegram",
+    "sms_instructions": "Aby wysłać SMS-em, skopiuj poniższy tekst i wklej go w wiadomości:"
   }
 }

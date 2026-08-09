@@ -255,7 +255,7 @@ def test_repeated_invitations_between_the_same_pair_collapse_to_the_latest():
 
     assert len(groups) == 1
     assert [entry.invitation_id for entry in groups[0].entries] == [3]
-    assert entry_line(groups[0].entries[0], _LANG) == "🟠 Wysłane do: Alisha Testowa"
+    assert entry_line(groups[0].entries[0], _LANG) == "🟠 Alisha Testowa — wysłane"
 
 
 def test_collapsing_is_scoped_per_tournament_not_globally():
@@ -289,13 +289,14 @@ def test_sent_pending_wording_matches_claude_md_example():
     invitation = _invitation(1, anna, maja, tournament, InvitationState.PENDING, _T0)
     entry = entry_from_invitation(invitation, viewer_pzt_id="P060")
 
-    assert entry_line(entry, _LANG) == "🟠 Wysłane do: Maja Testowa"
+    # CLAUDE.md step 8.4, CHANGE 4: the name leads, status follows.
+    assert entry_line(entry, _LANG) == "🟠 Maja Testowa — wysłane"
 
 
 def test_sent_rejected_and_not_attending_wording_matches_claude_md_example():
     # CLAUDE.md, step 8.1, PROBLEM 2: rejected and not-attending now share
     # 🔴 -- "the colour only needs to say 'not happening'" -- the wording
-    # still carries the distinction ("Odmowa" vs "Nie jedzie").
+    # still carries the distinction ("odmowa" vs "nie jedzie").
     anna = _player("P070", "Testowa Anna")
     bartosz = _player("P071", "Testowy Bartosz")
     wiktoria = _player("P072", "Testowa Wiktoria")
@@ -308,14 +309,14 @@ def test_sent_rejected_and_not_attending_wording_matches_claude_md_example():
         _invitation(2, anna, wiktoria, tournament, InvitationState.NOT_ATTENDING, _T0), "P070"
     )
 
-    assert entry_line(rejected, _LANG) == "🔴 Odmowa: Bartosz Testowy"
-    assert entry_line(not_attending, _LANG) == "🔴 Nie jedzie: Wiktoria Testowa"
+    assert entry_line(rejected, _LANG) == "🔴 Bartosz Testowy — odmowa"
+    assert entry_line(not_attending, _LANG) == "🔴 Wiktoria Testowa — nie jedzie"
 
 
 def test_received_pending_reads_differently_from_sent_pending():
-    # CLAUDE.md, step 8.1: direction is carried by the leading phrase --
-    # "Wysłane do:" vs "Zaproszenie od:" -- so a received pending line
-    # must not read the same as a sent one.
+    # CLAUDE.md step 8.4, CHANGE 4: direction is still carried by the
+    # status word after the name -- "wysłane" vs "zaprasza" -- so a
+    # received pending line must not read the same as a sent one.
     anna = _player("P080", "Testowa Anna")
     maja = _player("P081", "Testowa Maja")
     tournament = _tournament("g80", date(2026, 8, 29))
@@ -325,8 +326,8 @@ def test_received_pending_reads_differently_from_sent_pending():
     line = entry_line(entry, _LANG)
 
     assert entry.direction is Direction.RECEIVED
-    assert line == "🟠 Zaproszenie od: Maja Testowa"
-    assert line != "🟠 Wysłane do: Maja Testowa"
+    assert line == "🟠 Maja Testowa — zaprasza"
+    assert line != "🟠 Maja Testowa — wysłane"
 
 
 def test_matched_wording_is_symmetric_regardless_of_direction():
@@ -338,8 +339,8 @@ def test_matched_wording_is_symmetric_regardless_of_direction():
     as_inviter = entry_line(entry_from_invitation(invitation, "P090"), _LANG)
     as_invitee = entry_line(entry_from_invitation(invitation, "P091"), _LANG)
 
-    assert as_inviter == "🟢 Gracie razem: Jagoda Testowa"
-    assert as_invitee == "🟢 Gracie razem: Anna Testowa"
+    assert as_inviter == "🟢 Jagoda Testowa — gracie razem"
+    assert as_invitee == "🟢 Anna Testowa — gracie razem"
 
 
 # --- CLAUDE.md step 8.3, PROBLEM 2: every line's colour comes from the lookup ---
@@ -381,9 +382,9 @@ def test_render_groups_matches_claude_md_layout():
 
     assert text == (
         "OTK Zielona Góra - 29.08.2026\n"
-        "🟠 Wysłane do: Maja Testowa\n"
-        "🔴 Odmowa: Bartosz Testowy\n"
-        "🔴 Nie jedzie: Wiktoria Testowa"
+        "🟠 Maja Testowa — wysłane\n"
+        "🔴 Bartosz Testowy — odmowa\n"
+        "🔴 Wiktoria Testowa — nie jedzie"
     )
 
 

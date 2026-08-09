@@ -12,6 +12,11 @@ bot.handlers.invitations needs to find the row; the confirmation buttons
 carry nothing, since the tournament and the chosen partner are already in
 FSM state. Callback payloads come from the client and cannot be trusted:
 the handlers re-check that the tapper really is the invitation's invitee.
+
+CLAUDE.md step 8.4: the fourth [Menu] button step 8.3 added here is gone --
+the persistent reply keyboard (bot.keyboards.navigation.persistent_menu_keyboard)
+is always visible below the input box now, so a player who wants to step
+away first already has a way out without one.
 """
 
 from __future__ import annotations
@@ -21,7 +26,6 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.i18n import t
-from bot.keyboards.navigation import MenuCallback
 
 
 class ConfirmSendCallback(CallbackData, prefix="isend"):
@@ -53,12 +57,11 @@ def confirm_send_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 
 def invitation_answer_keyboard(invitation_id: int, lang: str) -> InlineKeyboardMarkup:
-    """CLAUDE.md step 8.3, PROBLEM 3: a fourth button, Menu, alongside the
-    three answers -- a player who wants to do something else first has a
-    way out. Tapping it does not answer the invitation: it stays PENDING,
-    answerable later from Moje deble (bot.handlers.navigation.handle_menu
-    handles the tap; it carries no invitation_id and touches no invitation
-    row)."""
+    """Three buttons, Zatwierdź / Odrzuć / "Nie jadę na ten turniej". A
+    player who wants to do something else first can just use the
+    persistent reply keyboard (CLAUDE.md step 8.4) -- the invitation stays
+    PENDING either way, answerable later from Moje deble, without needing
+    a fourth button here to say so."""
     builder = InlineKeyboardBuilder()
     builder.button(
         text=t("invitation.accept_button", lang),
@@ -72,6 +75,5 @@ def invitation_answer_keyboard(invitation_id: int, lang: str) -> InlineKeyboardM
         text=t("invitation.not_attending_button", lang),
         callback_data=NotAttendingCallback(invitation_id=invitation_id),
     )
-    builder.button(text=t("common.menu_button", lang), callback_data=MenuCallback())
     builder.adjust(1)
     return builder.as_markup()
