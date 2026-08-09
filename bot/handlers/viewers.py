@@ -33,13 +33,14 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
+from bot.keyboards.invite_friend import share_keyboard
+from bot.keyboards.navigation import viewer_menu_keyboard
 from bot.keyboards.viewers import (
     ViewerChooseAccountCallback,
     ViewerCreateInviteCallback,
     ViewerRevokeCallback,
     podglad_menu_keyboard,
     viewer_chooser_keyboard,
-    viewer_invite_share_keyboard,
 )
 from bot.lang import lang_for
 from bot.moje_deble import group_by_tournament, render_groups
@@ -100,9 +101,13 @@ async def handle_viewer_create_invite(callback: CallbackQuery, session: AsyncSes
 
     me = await bot.get_me()
     link = invite_link(me.username, token_row.token)
-    await callback.message.answer(
-        t("viewer.invite_created", lang, link=link), reply_markup=viewer_invite_share_keyboard(link, lang)
-    )
+    # CLAUDE.md step 10.1, PROBLEM 3: share the link through the same
+    # WhatsApp/Telegram pattern as "Zaproś na CourtDuo"
+    # (bot.keyboards.invite_friend.share_keyboard), reused rather than
+    # reimplemented -- and the message itself no longer shows the raw
+    # link as text, since a share button already carries it.
+    text = t("viewer.invite_share_text", lang, link=link)
+    await callback.message.answer(t("viewer.invite_created", lang), reply_markup=share_keyboard(link, text, lang))
 
 
 @router.callback_query(ViewerRevokeCallback.filter())
@@ -141,43 +146,63 @@ async def handle_viewer_choose_account(
     if watched is None:
         return
     own_account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
-    await render_readonly_moje_deble(callback.message, session, watched, lang_for(own_account))
+    await render_readonly_moje_deble(
+        callback.message, session, watched, lang_for(own_account), own_account is not None
+    )
 
 
-async def render_readonly_moje_deble(message: Message, session: AsyncSession, watched_account: Account, lang: str) -> None:
+async def render_readonly_moje_deble(
+    message: Message, session: AsyncSession, watched_account: Account, lang: str, viewer_has_own_account: bool
+) -> None:
     """CLAUDE.md step 10, WHAT A VIEWER CAN DO: "Open a read-only version
     of Moje deble." Reuses bot.moje_deble's pure grouping/rendering
     exactly as the player's own Moje deble does, keyed off the watched
     player's own pzt_id -- but with no reply_markup and no per-invitation
     follow-up messages at all, so there is no action button anywhere on
     this screen (WHAT A VIEWER CANNOT DO).
+
+    CLAUDE.md step 10.1: `viewer_has_own_account` says whose keyboard is
+    already showing below this message. A pure viewer (no Account row of
+    their own) gets viewer_menu_keyboard here -- otherwise they could be
+    left with persistent_menu_keyboard from some earlier, unrelated
+    message, buttons for flows they cannot complete. A registered player
+    looking at someone else's data keeps their own keyboard exactly as it
+    was (CLAUDE.md: "acts as themselves... full keyboard, unchanged") --
+    passing no reply_markup here leaves it untouched, and its own "Moje
+    deble" label already resolves back to their own account first
+    (bot.handlers.moje_deble), which doubles as their way back.
     """
     invitations = await crud.get_invitations_for_player(session, watched_account.pzt_id)
     groups = group_by_tournament(invitations, watched_account.pzt_id, _warsaw_today(), lang)
     heading = t("viewer.readonly_heading", lang, name=display_name(watched_account.full_name))
+    reply_markup = None if viewer_has_own_account else viewer_menu_keyboard(lang)
 
     if not groups:
-        await message.answer(f"{heading}\n\n{t('moje_deble.empty', lang)}")
+        await message.answer(f"{heading}\n\n{t('moje_deble.empty', lang)}", reply_markup=reply_markup)
         return
-    await message.answer(f"{heading}\n\n{render_groups(groups, lang)}")
+    await message.answer(f"{heading}\n\n{render_groups(groups, lang)}", reply_markup=reply_markup)
 
 
 async def render_moje_deble_for_viewer(message: Message, session: AsyncSession, telegram_id: int, lang: str) -> bool:
-    """Called by bot.handlers.moje_deble when `telegram_id` has no
-    account of its own. Returns False (nothing rendered, caller falls
-    through to its own not-registered message) when `telegram_id` holds
-    no active viewer grants either -- true for the overwhelming majority
-    of unregistered chats, which must see today's unchanged behaviour.
+    """Called by bot.handlers.moje_deble and bot.handlers.start when
+    `telegram_id` has no account of its own. Returns False (nothing
+    rendered, caller falls through to its own not-registered message)
+    when `telegram_id` holds no active viewer grants either -- true for
+    the overwhelming majority of unregistered chats, which must see
+    today's unchanged behaviour.
 
     CLAUDE.md step 10: a viewer_telegram_id may hold grants from more than
     one player at once, so more than one watched account needs a chooser
-    rather than picking one arbitrarily.
+    rather than picking one arbitrarily. Every caller of this function
+    already knows `telegram_id` has no Account of its own -- that's why
+    it's here rather than in the not-registered branch -- so
+    render_readonly_moje_deble always gets viewer_has_own_account=False.
     """
     grants = await crud.get_active_viewer_grants_for_telegram_id(session, telegram_id)
     if not grants:
         return False
     if len(grants) == 1:
-        await render_readonly_moje_deble(message, session, grants[0].account, lang)
+        await render_readonly_moje_deble(message, session, grants[0].account, lang, False)
         return True
     await message.answer(
         t("viewer.choose_account_prompt", lang),

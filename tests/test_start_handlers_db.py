@@ -125,15 +125,42 @@ async def test_start_with_a_valid_token_binds_the_viewer_and_notifies_the_player
 
     message.answer.assert_awaited_once()
     assert "Adam Nowak" in message.answer.call_args.args[0]
-    # CLAUDE.md step 10: "The player is notified when a viewer is added."
+    # CLAUDE.md step 10.1, PROBLEM 1: the binder has no CourtDuo account of
+    # their own, so this may be their first message ever -- they must get
+    # the viewer-only keyboard, never the full player one.
+    bind_markup = message.answer.call_args.kwargs["reply_markup"]
+    assert isinstance(bind_markup, ReplyKeyboardMarkup)
+    assert [[button.text for button in row] for row in bind_markup.keyboard] == [["Moje deble"]]
+    # CLAUDE.md step 10.1, PROBLEM 4: the grant notification's new wording.
     bot.send_message.assert_awaited_once()
     push_call = bot.send_message.await_args
     assert push_call.args[0] == 600010
-    assert "Rodzic Testowy" in push_call.args[1]
+    assert push_call.args[1] == "Rodzic Testowy ma teraz dostęp do podglądu Twojego konta CourtDuo."
     assert await crud.count_active_viewers(db_session, watched.id) == 1
     # Never the ordinary registration greeting for a bind -- it's a
     # separate flow, not a player /start.
     assert "PZT" not in message.answer.call_args.args[0]
+
+
+async def test_a_registered_player_binding_as_a_viewer_keeps_their_own_full_keyboard(db_session: AsyncSession):
+    # CLAUDE.md step 10.1, "acts as themselves... full keyboard,
+    # unchanged": a Telegram account that is already a registered player
+    # must not have its keyboard swapped just because it also taps
+    # someone else's viewer invite link.
+    db_session.add(Player(pzt_id="STR0013", full_name="Testowy Gracz", club=None, age_category=None, gender=None))
+    await db_session.flush()
+    db_session.add(Account(telegram_id=_TELEGRAM_ID, pzt_id="STR0013", full_name="Testowy Gracz", gender="M"))
+    await db_session.flush()
+    watched = await _add_watched_account(db_session, "STR0014", 600014)
+    token = await create_invite_token(db_session, watched)
+
+    message = _make_message()
+    bot = _make_bot_with_send()
+
+    await handle_start(message, _make_state(), db_session, bot, CommandObject(args=token.token))
+
+    message.answer.assert_awaited_once()
+    assert message.answer.call_args.kwargs.get("reply_markup") is None
 
 
 async def test_start_with_an_already_used_token_behaves_like_plain_start(db_session: AsyncSession):
@@ -194,6 +221,30 @@ async def test_start_with_an_unknown_token_behaves_like_plain_start(db_session: 
         c.args[0] for c in plain_message.answer.call_args_list
     ]
     unknown_bot.send_message.assert_not_awaited()
+
+
+# --- CLAUDE.md step 10.1, PROBLEM 1: a pure viewer's own /start ----------------
+
+
+async def test_a_pure_viewer_plain_start_gets_the_viewer_keyboard_not_registration(db_session: AsyncSession):
+    watched = await _add_watched_account(db_session, "STR0015", 600015, full_name="Kowalski Jan")
+    await crud.add_viewer(db_session, watched.id, _TELEGRAM_ID)
+
+    message = _make_message()
+    await handle_start(message, _make_state(), db_session, _make_bot_with_send(), CommandObject())
+
+    texts = [c.args[0] for c in message.answer.call_args_list]
+    # Never dropped into PZT-id registration -- this Telegram account has
+    # no player of its own, only a viewer grant.
+    assert not any("PZT" in text for text in texts)
+    assert any("Jan Kowalski" in text for text in texts)
+
+    # Both the greeting and the read-only view itself carry the
+    # viewer-only keyboard -- never persistent_menu_keyboard.
+    markups = _reply_keyboard_calls(message)
+    assert markups
+    for markup in markups:
+        assert [[button.text for button in row] for row in markup.keyboard] == [["Moje deble"]]
 
 
 async def test_completing_registration_also_attaches_the_persistent_keyboard(db_session: AsyncSession):

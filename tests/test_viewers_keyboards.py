@@ -12,7 +12,6 @@ from bot.keyboards.viewers import (
     ViewerRevokeCallback,
     podglad_menu_keyboard,
     viewer_chooser_keyboard,
-    viewer_invite_share_keyboard,
 )
 from db.models import Account, AccountViewer
 
@@ -56,18 +55,6 @@ def test_podglad_menu_with_no_viewers_is_just_the_create_button():
     buttons = _buttons(markup)
 
     assert [button.text for button in buttons] == ["Utwórz zaproszenie do podglądu"]
-
-
-def test_viewer_invite_share_keyboard_has_one_telegram_button_no_whatsapp():
-    # CLAUDE.md step 10: the token is for one specific person the player
-    # picks themselves via Telegram's own contact picker -- no WhatsApp
-    # button here, unlike bot.keyboards.invite_friend.share_keyboard.
-    markup = viewer_invite_share_keyboard("https://t.me/courtduo_bot?start=tok123", "pl")
-    buttons = _buttons(markup)
-
-    assert [button.text for button in buttons] == ["Telegram"]
-    assert buttons[0].url is not None
-    assert buttons[0].url.startswith("https://t.me/share/url?")
 
 
 def test_viewer_chooser_keyboard_shows_reordered_display_names():

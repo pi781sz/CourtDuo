@@ -16,7 +16,6 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.i18n import t
-from bot.invite_friend import telegram_share_url
 from core.text import display_name
 from db.models import Account, AccountViewer
 
@@ -48,24 +47,6 @@ def podglad_menu_keyboard(viewers: list[AccountViewer], lang: str) -> InlineKeyb
         )
     if len(viewers) < 3:
         builder.button(text=t("viewer.create_button", lang), callback_data=ViewerCreateInviteCallback())
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def viewer_invite_share_keyboard(link: str, lang: str) -> InlineKeyboardMarkup:
-    """One Telegram share button for the freshly created invite link --
-    the token is meant for one specific person the player picks
-    themselves (CLAUDE.md step 10: "send to whoever they choose"), so this
-    reuses bot.keyboards.invite_friend's contact-picker pattern rather
-    than a WhatsApp button too: WhatsApp's share sheet needs a plain text
-    message it can prefill, and this link is a t.me URL, best handed over
-    via Telegram's own forward-to-contact sheet.
-    """
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=t("viewer.invite_share_button", lang),
-        url=telegram_share_url(link, t("viewer.invite_share_text", lang, link=link)),
-    )
     builder.adjust(1)
     return builder.as_markup()
 

@@ -17,9 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.attempt_limiter import FailedAttemptLimiter
 from bot.handlers.tournament_search import start_tournament_search
+from bot.handlers.viewers import render_moje_deble_for_viewer
 from bot.i18n import t
 from bot.invitation_text import gendered
-from bot.keyboards.navigation import persistent_menu_keyboard
+from bot.keyboards.navigation import persistent_menu_keyboard, viewer_menu_keyboard
 from bot.lang import DEFAULT_LANG, lang_for
 from bot.notifications import push
 from bot.pending_external_invites import notify_pending_external_invites
@@ -67,8 +68,14 @@ async def handle_start(
             # otherwise, same fallback bot.lang.lang_for uses everywhere.
             viewer_account = await crud.get_account_by_telegram_id(session, message.from_user.id)
             viewer_lang = lang_for(viewer_account)
+            # CLAUDE.md step 10.1: a registered player acts as themselves
+            # (their own keyboard is already full and stays that way) --
+            # only a Telegram account with no player account of its own
+            # needs the viewer-only keyboard, and this may be its first
+            # message ever.
             await message.answer(
-                gendered("viewer.bound", watched.gender, viewer_lang, name=display_name(watched.full_name))
+                gendered("viewer.bound", watched.gender, viewer_lang, name=display_name(watched.full_name)),
+                reply_markup=None if viewer_account is not None else viewer_menu_keyboard(viewer_lang),
             )
             await push(
                 bot,
@@ -86,6 +93,19 @@ async def handle_start(
         lang = lang_for(account)
         await message.answer(t("start.greeting_returning", lang), reply_markup=persistent_menu_keyboard(lang))
         await start_tournament_search(message, state, lang, session, account)
+        return
+
+    # CLAUDE.md step 10.1: a Telegram account with no player account of
+    # its own may still be a read-only viewer of one or more players
+    # (CLAUDE.md step 10) -- checked before falling into fresh
+    # registration below, so their own /start opens the read-only view
+    # with the viewer-only keyboard instead of asking for a PZT id that
+    # doesn't apply to them.
+    if await crud.get_active_viewer_grants_for_telegram_id(session, message.from_user.id):
+        await message.answer(
+            t("start.greeting_viewer", DEFAULT_LANG), reply_markup=viewer_menu_keyboard(DEFAULT_LANG)
+        )
+        await render_moje_deble_for_viewer(message, session, message.from_user.id, DEFAULT_LANG)
         return
 
     # CLAUDE.md step 8.4: the persistent reply keyboard is attached on this

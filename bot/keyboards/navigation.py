@@ -29,6 +29,19 @@ its own inline [Moje deble] button, reusing MojeDebleCallback and its
 existing handler unchanged. Deliberately not added to any other message:
 CLAUDE.md step 8.2 already established that mid-flow inline clutter is
 worse than the dead end it solves.
+
+viewer_menu_keyboard (step 10.1) is the reply keyboard for the other side
+of "whose account is in play" (CLAUDE.md, "Identity"): a Telegram account
+with no CourtDuo player account of its own, holding only a read-only
+viewer grant. It never gets persistent_menu_keyboard -- Znajdź partnera
+and Zaproś na CourtDuo both start flows a viewer cannot complete -- only
+the one label that already opens the read-only Moje deble a viewer is
+allowed to see. A registered player who is also a viewer is never shown
+this keyboard: their own flows keep persistent_menu_keyboard unchanged
+(CLAUDE.md: "using the bot normally, they are always themselves"), and
+tapping "Moje deble" there already resolves to their own account first
+(bot.handlers.moje_deble), which doubles as their way back whenever they
+were last looking at someone else's read-only view.
 """
 
 from __future__ import annotations
@@ -75,3 +88,14 @@ def invitation_sent_keyboard(lang: str) -> InlineKeyboardMarkup:
     builder.button(text=t("common.moje_deble_button", lang), callback_data=MojeDebleCallback())
     builder.adjust(1)
     return builder.as_markup()
+
+
+def viewer_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
+    """CLAUDE.md step 10.1: the reply keyboard for a Telegram account that
+    has no CourtDuo player account of its own -- see the module docstring
+    for why this is a separate keyboard rather than persistent_menu_keyboard
+    with a button hidden."""
+    builder = ReplyKeyboardBuilder()
+    builder.button(text=t("common.moje_deble_button", lang))
+    builder.adjust(1)
+    return builder.as_markup(resize_keyboard=True, is_persistent=True)
