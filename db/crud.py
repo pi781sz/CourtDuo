@@ -43,6 +43,7 @@ from .models import (
     Gender,
     Invitation,
     InvitationState,
+    PendingExternalInvite,
     Player,
     Ranking,
     RankingList,
@@ -367,6 +368,22 @@ async def get_player_own_age_category(session: AsyncSession, pzt_id: str) -> Age
 async def get_tournament_by_guid(session: AsyncSession, guid: str) -> Tournament | None:
     result = await session.execute(select(Tournament).where(Tournament.guid == guid))
     return result.scalar_one_or_none()
+
+
+def tournament_search_still_open(tournament: Tournament, today: date, now: datetime) -> bool:
+    """The "within the window, search still open" half of CLAUDE.md build
+    order step 9's PART 2 eligibility check, for a specific tournament a
+    pending_external_invites row already points at. Deliberately narrower
+    than get_eligible_tournaments: gender/age_category/ranga were already
+    true of this exact tournament when the attempt was stored
+    (bot.invitation_send.send_not_on_courtduo_response only ever writes a
+    row after every one of step 6's checks passed) and cannot change
+    underneath an existing row, so re-checking them here would be redundant.
+    """
+    if tournament.date_from is None or tournament.search_closes_at is None:
+        return False
+    cutoff = today + timedelta(days=ELIGIBILITY_WINDOW_DAYS)
+    return today <= tournament.date_from <= cutoff and tournament.search_closes_at > now
 
 
 async def get_eligible_tournaments(
@@ -726,3 +743,60 @@ async def create_invitation(
     session.add(invitation)
     await session.flush()
     return invitation
+
+
+# --- Non-user invite flow (CLAUDE.md scenario 2; build order step 9) --------
+
+
+async def create_pending_external_invite_if_missing(
+    session: AsyncSession, inviter_pzt_id: str, invitee_pzt_id: str, tournament_guid: str
+) -> None:
+    """Remembers one "share this invite" attempt against a named player who
+    is on PZT's roster but has no CourtDuo account yet, so they can be
+    notified of it once they register (CLAUDE.md scenario 2). `ON CONFLICT
+    DO NOTHING` against uq_pending_external_invite_inviter_invitee_tournament
+    is what makes this safe to call every time the "does not use CourtDuo
+    yet" screen is shown -- re-showing it (e.g. the player reopens the same
+    chat) must not create a second row for the same (inviter, invitee,
+    tournament).
+    """
+    stmt = (
+        insert(PendingExternalInvite)
+        .values(inviter_pzt_id=inviter_pzt_id, invitee_pzt_id=invitee_pzt_id, tournament_guid=tournament_guid)
+        .on_conflict_do_nothing(
+            index_elements=[
+                PendingExternalInvite.inviter_pzt_id,
+                PendingExternalInvite.invitee_pzt_id,
+                PendingExternalInvite.tournament_guid,
+            ]
+        )
+    )
+    await session.execute(stmt)
+
+
+async def get_pending_external_invites_for_invitee(
+    session: AsyncSession, invitee_pzt_id: str
+) -> list[PendingExternalInvite]:
+    """Every stored attempt to invite `invitee_pzt_id`, across every
+    inviter and tournament -- looked up once, on successful registration
+    (CLAUDE.md scenario 2: "When someone registers whose name matches,
+    notify Adam"). Eagerly loads the tournament, since the caller needs its
+    eligibility fields for every row without a query each.
+    """
+    result = await session.execute(
+        select(PendingExternalInvite)
+        .options(selectinload(PendingExternalInvite.tournament))
+        .where(PendingExternalInvite.invitee_pzt_id == invitee_pzt_id)
+    )
+    return list(result.scalars().all())
+
+
+async def delete_pending_external_invite(session: AsyncSession, pending_id: int) -> None:
+    """Removes one row once it has served its purpose -- notified (or found
+    no longer worth notifying about) on the invitee's registration, or
+    acted on via the "send the real invitation" offer. Nothing else in
+    CourtDuo ever reads a row past that point.
+    """
+    pending = await session.get(PendingExternalInvite, pending_id)
+    if pending is not None:
+        await session.delete(pending)

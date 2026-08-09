@@ -43,5 +43,7 @@ class Player(TimestampMixin, Base):
         foreign_keys="Invitation.invitee_pzt_id", back_populates="invitee", cascade="all, delete-orphan"
     )
     pending_external_invites: Mapped[list["PendingExternalInvite"]] = relationship(
-        back_populates="inviter", cascade="all, delete-orphan"
+        foreign_keys="PendingExternalInvite.inviter_pzt_id",
+        back_populates="inviter",
+        cascade="all, delete-orphan",
     )

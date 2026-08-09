@@ -114,8 +114,11 @@ async def send_invitation(
 
     invitee_account = await crud.get_account_by_pzt_id(session, invitee.pzt_id)
     if invitee_account is None:
-        # CLAUDE.md scenario 2 (invite a non-user) is build order step 9;
-        # until it exists there is nowhere to deliver this.
+        # CLAUDE.md scenario 2: the named player is on PZT's roster but has
+        # no CourtDuo account, so there is nowhere to deliver this. The
+        # caller (bot.invitation_send.send_not_on_courtduo_response) is
+        # what remembers the attempt for build order step 9's "they joined"
+        # notification -- this transaction only reports the failure.
         return SendResult(failure=SendFailure.INVITEE_NOT_ON_COURTDUO)
 
     if tournament.search_closes_at is None or tournament.search_closes_at <= now or tournament.date_from is None:

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
@@ -19,6 +19,7 @@ from bot.handlers.tournament_search import start_tournament_search
 from bot.i18n import t
 from bot.keyboards.navigation import persistent_menu_keyboard
 from bot.lang import DEFAULT_LANG, lang_for
+from bot.pending_external_invites import notify_pending_external_invites
 from bot.registration import RegistrationOutcome, register_by_pzt_id
 from bot.states import Registration
 from core.text import first_name
@@ -65,7 +66,7 @@ async def handle_start(message: Message, state: FSMContext, session: AsyncSessio
 
 
 @router.message(Registration.waiting_pzt_id)
-async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSession, bot: Bot) -> None:
     telegram_id = message.from_user.id
     lang = DEFAULT_LANG
 
@@ -93,4 +94,13 @@ async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSessi
         t("registration.welcome", lang, first_name=first_name(account.full_name)),
         reply_markup=persistent_menu_keyboard(lang),
     )
+
+    # CLAUDE.md scenario 2, build order step 9 PART 2: tell every inviter
+    # who is still owed a real invitation to this newly registered player.
+    # Player.pzt_id is the account's own pzt_id (see bot.registration) --
+    # the account and its player row always exist by this point.
+    player = await crud.get_player_by_pzt_id(session, account.pzt_id)
+    if player is not None:
+        await notify_pending_external_invites(session, bot, player)
+
     await start_tournament_search(message, state, lang_for(account), session, account)
