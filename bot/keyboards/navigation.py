@@ -1,11 +1,19 @@
-"""The persistent reply keyboard (CLAUDE.md, step 8.4) and the one inline
-button that survives alongside it.
+"""The persistent reply keyboard (CLAUDE.md, step 8.4, made genuinely
+persistent by step 8.5) and the one inline button that survives alongside
+it.
 
 Step 8.2's inline [Menu] button — attached to every terminal message so a
-player always had a way back — is gone: persistent_menu_keyboard() is
-attached once at the start of a session and stays visible under the input
-box the whole time, so no individual message needs a navigation button of
-its own any more.
+player always had a way back — is gone: persistent_menu_keyboard() takes
+its place. Step 8.4 attached it once, on /start, on the assumption that a
+reply keyboard stays visible under every later message once Telegram has
+shown it once; live testing found real gaps in that assumption -- entry
+points other than /start (the /moje_deble fallback before an account
+exists, unprompted invitation pushes) never sent it at all. Step 8.5 fixed
+that by re-attaching it on every plain-text message a session can
+plausibly start from, not only /start's own greeting -- see CLAUDE.md,
+"Navigation", for exactly which messages that is and why messages that
+already need an inline keyboard of their own are skipped (Telegram allows
+only one `reply_markup` per message).
 
 find_partner_keyboard is the one exception, kept for bot.handlers.moje_deble:
 its own summary/empty state still needs a single "Znajdź partnera" button

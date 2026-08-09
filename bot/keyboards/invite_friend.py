@@ -1,9 +1,13 @@
-"""Inline keyboard for "Zaproś na CourtDuo" (CLAUDE.md step 8.4, CHANGE 2):
-two URL buttons, WhatsApp and Telegram. Telegram's Bot API only accepts
-http(s) (and tg://) schemes for an inline URL button and rejects an sms:
-one outright -- so there is deliberately no SMS button here; the SMS case
-is handled by putting the share text in the message body instead (see
-bot.handlers.invite_friend).
+"""Inline keyboard for "Zaproś na CourtDuo": two URL buttons, WhatsApp and
+Telegram (CLAUDE.md step 8.4, CHANGE 2; the SMS option step 8.4 worked
+around was dropped entirely by step 8.5, since Telegram's inline URL
+buttons only accept http(s) (and tg://) schemes and reject an sms: one
+outright).
+
+Also reused by bot.invitation_send when a named player exists in PZT's
+rankings but has no CourtDuo account yet (CLAUDE.md step 8.5, PROBLEM 4):
+same two buttons, same generic share text -- the named player's own name
+never goes into it, since that message may end up sent to anyone.
 """
 
 from __future__ import annotations

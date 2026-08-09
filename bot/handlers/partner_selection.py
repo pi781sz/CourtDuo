@@ -13,7 +13,7 @@ bot.handlers.tournament_search around bot.tournament_search.
 
 from __future__ import annotations
 
-from aiogram import Router
+from aiogram import Bot, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,7 +37,7 @@ router = Router(name="partner_selection")
 
 
 @router.message(PartnerSelection.waiting_name)
-async def handle_partner_name(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def handle_partner_name(message: Message, state: FSMContext, session: AsyncSession, bot: Bot) -> None:
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     lang = lang_for(account)
 
@@ -75,7 +75,7 @@ async def handle_partner_name(message: Message, state: FSMContext, session: Asyn
         await message.answer(t("partner_selection.too_many_matches", lang))
         return
     if outcome is MatchOutcome.SINGLE:
-        await handle_partner_candidate(message, state, session, lang, account, tournament, matches[0])
+        await handle_partner_candidate(message, state, session, lang, account, tournament, matches[0], bot)
         return
 
     options = await build_candidate_options(session, matches, tournament.age_category, lang)
@@ -87,7 +87,7 @@ async def handle_partner_name(message: Message, state: FSMContext, session: Asyn
 
 @router.callback_query(PartnerSelectCallback.filter(), PartnerSelection.waiting_name)
 async def handle_partner_select(
-    callback: CallbackQuery, callback_data: PartnerSelectCallback, state: FSMContext, session: AsyncSession
+    callback: CallbackQuery, callback_data: PartnerSelectCallback, state: FSMContext, session: AsyncSession, bot: Bot
 ) -> None:
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
@@ -109,4 +109,4 @@ async def handle_partner_select(
         await callback.message.answer(t("partner_selection.not_found", lang))
         return
 
-    await handle_partner_candidate(callback.message, state, session, lang, account, tournament, candidate)
+    await handle_partner_candidate(callback.message, state, session, lang, account, tournament, candidate, bot)

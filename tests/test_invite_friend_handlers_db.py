@@ -1,14 +1,16 @@
 """Tests for bot.handlers.invite_friend.handle_invite_friend (CLAUDE.md
-step 8.4, CHANGE 2): the "Zaproś na CourtDuo" persistent-keyboard label.
-Needs a real Postgres for the Account row the handler looks up -- see
-tests/conftest.py, skipped cleanly when TEST_DATABASE_URL is unset.
-Invented telegram ids/names/pzt_ids only.
+step 8.4, CHANGE 2, share channels trimmed to two by step 8.5): the
+"Zaproś na CourtDuo" persistent-keyboard label. Needs a real Postgres for
+the Account row the handler looks up -- see tests/conftest.py, skipped
+cleanly when TEST_DATABASE_URL is unset. Invented telegram ids/names/
+pzt_ids only.
 """
 
 from __future__ import annotations
 
 import re
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import unquote
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +40,11 @@ async def _make_account(session: AsyncSession) -> None:
     await session.flush()
 
 
+def _button_urls(message: MagicMock) -> list[str]:
+    markup = message.answer.call_args.kwargs["reply_markup"]
+    return [button.url for row in markup.inline_keyboard for button in row]
+
+
 async def test_link_comes_from_get_me_not_a_literal(db_session: AsyncSession):
     await _make_account(db_session)
     message = _make_message()
@@ -46,20 +53,22 @@ async def test_link_comes_from_get_me_not_a_literal(db_session: AsyncSession):
     await handle_invite_friend(message, db_session, bot)
 
     bot.get_me.assert_awaited_once()
-    body = message.answer.call_args.args[0]
-    assert "https://t.me/courtduo_prod_bot" in body
+    urls = [unquote(url) for url in _button_urls(message)]
+    assert any("https://t.me/courtduo_prod_bot" in url for url in urls)
 
     # A different bot (e.g. the test bot) produces a different link from
     # the exact same code path -- proves it isn't hardcoded anywhere.
     message2 = _make_message()
     bot2 = _make_bot("courtduo_test_bot")
     await handle_invite_friend(message2, db_session, bot2)
-    body2 = message2.answer.call_args.args[0]
-    assert "https://t.me/courtduo_test_bot" in body2
-    assert "courtduo_prod_bot" not in body2
+    urls2 = [unquote(url) for url in _button_urls(message2)]
+    assert any("https://t.me/courtduo_test_bot" in url for url in urls2)
+    assert not any("courtduo_prod_bot" in url for url in urls2)
 
 
-async def test_message_includes_copyable_sms_text_since_no_sms_button_exists(db_session: AsyncSession):
+async def test_message_and_keyboard_have_no_sms_option(db_session: AsyncSession):
+    # CLAUDE.md step 8.5, PROBLEM 2: SMS is dropped entirely, not just the
+    # button -- no copyable text, no instructions, nowhere.
     await _make_account(db_session)
     message = _make_message()
     bot = _make_bot("courtduo_prod_bot")
@@ -67,10 +76,10 @@ async def test_message_includes_copyable_sms_text_since_no_sms_button_exists(db_
     await handle_invite_friend(message, db_session, bot)
 
     body = message.answer.call_args.args[0]
-    assert "<code>" in body
+    assert "SMS" not in body
+    assert "<code>" not in body
     markup = message.answer.call_args.kwargs["reply_markup"]
     button_texts = [button.text for row in markup.inline_keyboard for button in row]
-    assert "SMS" not in button_texts
     assert button_texts == ["WhatsApp", "Telegram"]
 
 
@@ -98,8 +107,7 @@ async def test_no_phone_number_appears_anywhere_in_the_share_flow(db_session: As
     await handle_invite_friend(message, db_session, bot)
 
     body = message.answer.call_args.args[0]
-    markup = message.answer.call_args.kwargs["reply_markup"]
-    urls = [button.url for row in markup.inline_keyboard for button in row]
+    urls = _button_urls(message)
     # No phone-number-shaped token (a run of 7+ digits, optionally with a
     # leading +) anywhere in what was sent.
     assert not re.search(r"\+?\d{7,}", body)

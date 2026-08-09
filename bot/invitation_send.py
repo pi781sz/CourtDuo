@@ -18,13 +18,16 @@ by somebody else in the meantime.
 
 from __future__ import annotations
 
+from aiogram import Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
 from bot.invitation_text import confirmation_text
+from bot.invite_friend import share_link, share_text
 from bot.keyboards.invitations import confirm_send_keyboard
+from bot.keyboards.invite_friend import share_keyboard
 from bot.states import InvitationSend
 from bot.tournament_search import label_for_tournament
 from core.text import display_name
@@ -40,17 +43,30 @@ async def start_invitation_send(
     account: Account,
     tournament: Tournament,
     invitee: Player,
+    bot: Bot,
 ) -> None:
     invitee_account = await crud.get_account_by_pzt_id(session, invitee.pzt_id)
     if invitee_account is None:
         # The named player is on PZT's roster but doesn't use CourtDuo, so
         # there is nowhere to deliver an invitation. CLAUDE.md scenario 2
-        # (share text via the player's own phone contacts) is build order
-        # step 9; until then, say so and let them type another name rather
-        # than show a confirmation screen that cannot lead anywhere. The
-        # player stays in PartnerSelection.waiting_name. Mid-flow
-        # (CLAUDE.md step 8.2): the message itself says to type another name.
-        await message.answer(t("invitation.invitee_not_on_courtduo", lang, name=display_name(invitee.full_name)))
+        # (a stored pending_external_invite and the "they joined" callback)
+        # is build order step 9; until then, say so and let them type
+        # another name rather than show a confirmation screen that cannot
+        # lead anywhere. CLAUDE.md step 8.5, PROBLEM 4: that dead end is
+        # softened with the same WhatsApp/Telegram share buttons
+        # "Zaproś na CourtDuo" offers -- the named player's name never goes
+        # into the share text itself (CLAUDE.md, non-negotiable rule 2:
+        # this message might be sent to anyone, and the bot must not be the
+        # one revealing who it was really meant for). The player stays in
+        # PartnerSelection.waiting_name. Mid-flow (CLAUDE.md step 8.2): the
+        # message itself says to type another name.
+        me = await bot.get_me()
+        link = share_link(me.username)
+        text = share_text(link, lang)
+        await message.answer(
+            t("invitation.invitee_not_on_courtduo", lang, name=display_name(invitee.full_name)),
+            reply_markup=share_keyboard(link, text, lang),
+        )
         return
 
     await state.update_data(partner_pzt_id=invitee.pzt_id)

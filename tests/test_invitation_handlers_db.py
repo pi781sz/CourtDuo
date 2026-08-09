@@ -147,6 +147,21 @@ def _push_markups(bot: MagicMock) -> dict[int, list]:
     return markups
 
 
+def _is_persistent_menu(markup) -> bool:
+    """CLAUDE.md step 8.5: every plain-text reply an invitee or inviter
+    gets from the invitation flow -- an answer to their own tap, or an
+    unprompted push -- carries the persistent reply keyboard, since a
+    player answering an invitation may not have been in any conversation
+    with the bot beforehand."""
+    return (
+        markup is not None
+        and markup.is_persistent is True
+        and markup.resize_keyboard is True
+        and [[button.text for button in row] for row in markup.keyboard]
+        == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"]]
+    )
+
+
 async def _state_for(telegram_id: int, tournament_guid: str, partner_pzt_id: str) -> FSMContext:
     state = FSMContext(storage=MemoryStorage(), key=StorageKey(bot_id=1, chat_id=telegram_id, user_id=telegram_id))
     await state.update_data(
@@ -282,8 +297,10 @@ async def test_accept_tells_both_sides_and_every_cancelled_player(db_session: As
     await handle_accept(callback, AcceptInvitationCallback(invitation_id=chosen.id), db_session, bot)
 
     assert _answers(callback) == [f"🟢 Partner: Anna Testowa — {_LABEL}"]
-    # CLAUDE.md step 8.4: no inline navigation button any more.
-    assert _answer_markups(callback)[0] is None
+    # CLAUDE.md step 8.4: no inline navigation button any more -- step 8.5:
+    # the persistent reply keyboard instead, since this may be the first
+    # thing the invitee sees in a while.
+    assert _is_persistent_menu(_answer_markups(callback)[0])
     pushed = _pushes(bot)
     # The inviter: the alert, then her own 🟢 status. Feminine verb.
     assert pushed[8030] == [f"Jagoda Testowa przyjęła zaproszenie.\n🟢 Partner: Jagoda Testowa — {_LABEL}"]
@@ -291,8 +308,10 @@ async def test_accept_tells_both_sides_and_every_cancelled_player(db_session: As
     assert pushed[8032] == ["Ten zawodnik znalazł już partnera."]
     assert pushed[8033] == ["Ten zawodnik znalazł już partnera."]
     assert set(pushed) == {8030, 8032, 8033}
+    # Every one of these is an unprompted push (CLAUDE.md step 8.5): the
+    # persistent reply keyboard rides along on all of them.
     push_markups = _push_markups(bot)
-    assert all(markup is None for markups in push_markups.values() for markup in markups)
+    assert all(_is_persistent_menu(markup) for markups in push_markups.values() for markup in markups)
 
 
 async def test_accept_still_matches_when_the_inviter_has_blocked_the_bot(db_session: AsyncSession):
@@ -342,10 +361,11 @@ async def test_reject_tells_the_inviter_with_the_right_verb_for_a_boy(db_session
     await handle_reject(callback, RejectInvitationCallback(invitation_id=invitation.id), db_session, bot)
 
     assert _answers(callback) == [f"🔴 Odrzuciłeś zaproszenie od Adam Testowy — {_LABEL}."]
-    # CLAUDE.md step 8.4: no inline navigation button any more.
-    assert _answer_markups(callback)[0] is None
+    # CLAUDE.md step 8.4: no inline navigation button any more -- step 8.5:
+    # the persistent reply keyboard instead.
+    assert _is_persistent_menu(_answer_markups(callback)[0])
     assert _pushes(bot)[8050] == [f"🔴 Marek Testowy odrzucił zaproszenie — {_LABEL}."]
-    assert _push_markups(bot)[8050][0] is None
+    assert _is_persistent_menu(_push_markups(bot)[8050][0])
     assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.REJECTED
 
 
@@ -364,10 +384,10 @@ async def test_not_attending_tells_the_inviter_something_neutral(db_session: Asy
     await handle_not_attending(callback, NotAttendingCallback(invitation_id=invitation.id), db_session, bot)
 
     assert _answers(callback) == ["Odpowiedziałaś, że nie jedziesz na ten turniej."]
-    assert _answer_markups(callback)[0] is None
+    assert _is_persistent_menu(_answer_markups(callback)[0])
     # 🔴, same colour as a refusal now (CLAUDE.md step 8.3, PROBLEM 2).
     assert _pushes(bot)[8060] == ["🔴 Jagoda Testowa nie jedzie na ten turniej."]
-    assert _push_markups(bot)[8060][0] is None
+    assert _is_persistent_menu(_push_markups(bot)[8060][0])
     assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.NOT_ATTENDING
 
 
@@ -392,5 +412,5 @@ async def test_answering_an_already_cancelled_invitation_says_so_without_changin
     await handle_accept(callback, AcceptInvitationCallback(invitation_id=to_ola.id), db_session, _make_bot())
 
     assert _answers(callback) == ["Ten zawodnik znalazł już partnera."]
-    assert _answer_markups(callback)[0] is None
+    assert _is_persistent_menu(_answer_markups(callback)[0])
     assert (await crud.get_invitation_by_id(db_session, to_ola.id)).state is InvitationState.CANCELLED

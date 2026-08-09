@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import all_translations, t
 from bot.keyboards.invitations import invitation_answer_keyboard
-from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard
+from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard, persistent_menu_keyboard
 from bot.lang import lang_for
 from bot.moje_deble import entry_line, group_by_tournament, pending_received_entries, render_groups
 from db import crud
@@ -89,10 +89,14 @@ async def handle_moje_deble_command(message: Message, session: AsyncSession) -> 
     lang = lang_for(account)
     if account is None:
         # Unlike the button, the command is typeable by anyone at any
-        # time, including before /start has ever run. No [Menu] here
-        # (CLAUDE.md step 8.2): there is no account yet for either of its
-        # two options to act on -- the only real next step is /start.
-        await message.answer(t("moje_deble.not_registered", lang))
+        # time, including before /start has ever run -- so this can be a
+        # session's very first message, one /start never reached (CLAUDE.md
+        # step 8.5: "Attach it on every message that starts an
+        # interaction, not only /start"). There is no account yet for
+        # either of the keyboard's other two labels to act on, but showing
+        # it here still points the player at /start instead of leaving
+        # them with no way forward at all.
+        await message.answer(t("moje_deble.not_registered", lang), reply_markup=persistent_menu_keyboard(lang))
         return
     await _render_and_send(message, session, account, lang)
 
@@ -125,6 +129,6 @@ async def handle_moje_deble_button_press(message: Message, session: AsyncSession
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     lang = lang_for(account)
     if account is None:
-        await message.answer(t("moje_deble.not_registered", lang))
+        await message.answer(t("moje_deble.not_registered", lang), reply_markup=persistent_menu_keyboard(lang))
         return
     await _render_and_send(message, session, account, lang)

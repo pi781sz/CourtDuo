@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import unquote
 
 from aiogram import Bot
 from aiogram.fsm.storage.base import StorageKey
@@ -77,6 +78,24 @@ def _sent_texts(bot: Bot) -> list[str]:
         if text is not None:
             texts.append(text)
     return texts
+
+
+def _sent_button_urls(bot: Bot) -> list[str]:
+    """Every inline URL button's url out of bot.session's SendMessage call
+    log -- the share link now lives on the WhatsApp/Telegram buttons, not
+    in message text (CLAUDE.md step 8.5, PROBLEM 2: SMS's copyable-text
+    fallback is gone)."""
+    urls = []
+    for call in bot.session.await_args_list:
+        method = call.args[1]
+        markup = getattr(method, "reply_markup", None)
+        if markup is None or not hasattr(markup, "inline_keyboard"):
+            continue
+        for row in markup.inline_keyboard:
+            for button in row:
+                if button.url is not None:
+                    urls.append(button.url)
+    return urls
 
 
 async def _add_account(session: AsyncSession, telegram_id: int, pzt_id: str, full_name: str) -> None:
@@ -143,10 +162,11 @@ async def test_invite_label_wins_over_a_typed_partner_name(db_sessionmaker: asyn
     await _dispatcher.feed_update(bot, _make_update(telegram_id, "Zaproś na CourtDuo", update_id=1))
 
     texts = _sent_texts(bot)
-    assert any("Zaproś znajomego do CourtDuo" in text for text in texts)
+    assert any("Zaproś zawodnika, którego znasz do CourtDuo" in text for text in texts)
     # Not misread as a (nonexistent) player's name.
     assert not any("Nie znaleziono takiego zawodnika" in text for text in texts)
-    assert "https://t.me/courtduo_test_bot" in "".join(texts)
+    decoded_urls = [unquote(url) for url in _sent_button_urls(bot)]
+    assert any("https://t.me/courtduo_test_bot" in url for url in decoded_urls)
 
 
 async def test_a_typed_partner_name_is_not_swallowed_by_the_menu_handlers(

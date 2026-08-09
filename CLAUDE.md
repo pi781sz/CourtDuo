@@ -61,11 +61,11 @@ Gender is derived from which ranking list the player appears in:
 [Moje deble]  [Zaproś na CourtDuo]
 ```
 
-Attached once, on `/start` — for a brand new registration, on the very first greeting; for a returning player, on the greeting that precedes the age-category screen — so it is present for the whole session from the first message on. Tapping a label sends it back as an ordinary text message; `bot.i18n.all_translations` matches that text against every locale's rendering of the label (not just the account's own language), and those handlers are registered ahead of the state-scoped ones (place, partner name, PZT id) so a tap always wins even mid-flow.
+Attached on `/start` — for a brand new registration, on the very first greeting; for a returning player, on the greeting that precedes the age-category screen — but **not only there** (step 8.5: a keyboard sent exactly once, on `/start`, left every other entry into the bot without one — `/moje_deble` typed before `/start` ever ran, or a push notification landing in a chat the reply keyboard hadn't reached yet). It is re-attached on every plain-text reply that can plausibly be a player's first message of a session: the `/moje_deble` fallback shown before an account exists, every unprompted push (a new invitation's answer, an accept/reject/"nie jadę" notification, a cancelled-by-match notice), and every reply an invitee gets to their own tap. It is *not* re-attached on a message that already needs an inline keyboard of its own (a category list, a confirmation screen, the three invitation-answer buttons) — Telegram allows exactly one `reply_markup` per message, inline and reply keyboards can't share one, and once shown the reply keyboard stays visible under messages that carry an inline one too (the two are separate layers). Tapping a label sends it back as an ordinary text message; `bot.i18n.all_translations` matches that text against every locale's rendering of the label (not just the account's own language), and those handlers are registered ahead of the state-scoped ones (place, partner name, PZT id) so a tap always wins even mid-flow.
 
 This replaces the inline `[Menu]` button and its two-option chooser that earlier steps used: no message anywhere needs a navigation button of its own any more, because the three actions are already one tap away, always. Inline keyboards for actual **choices** — category buttons, tournament lists, disambiguation, the invitation's three answer buttons — stay inline and unchanged; the reply keyboard only ever carries these three fixed actions.
 
-**Zaproś na CourtDuo** — a generic invite, unattached to any tournament or named player. Sends WhatsApp and Telegram share buttons (both plain `https://` URLs — Telegram inline buttons accept nothing else, so there is no SMS button) pre-filled with a short Polish invitation and a link built from the bot's own username (`get_me()`, fetched at runtime — never hardcoded, so the same code is correct for the test and production bots). The SMS case is a copyable line in the message body instead of a broken button. The bot never sees, stores or handles a phone number here either (rule 2) — the recipient is chosen in the player's own phone/app. This is **not** step 9's flow: no `pending_external_invites` row, no "they joined" callback, nothing tournament- or player-specific.
+**Zaproś na CourtDuo** — a generic invite, unattached to any tournament or named player. Sends WhatsApp and Telegram share buttons (both plain `https://` URLs — Telegram inline buttons accept nothing else) pre-filled with a short Polish invitation and a link built from the bot's own username (`get_me()`, fetched at runtime — never hardcoded, so the same code is correct for the test and production bots). There is no SMS option at all (step 8.5 dropped it — an `sms:` inline button is rejected outright by Telegram, and the copyable-text-in-the-message-body workaround it had was more clutter than it was worth). The bot never sees, stores or handles a phone number here either (rule 2) — the recipient is chosen in the player's own phone/app. This is **not** step 9's flow: no `pending_external_invites` row, no "they joined" callback, nothing tournament- or player-specific. The same two buttons and share text are reused (still with no named player in the text — see "Pre-invitation checks") when a player names someone who exists in PZT's rankings but has no CourtDuo account yet, so that dead end isn't a total one either.
 
 ---
 
@@ -115,7 +115,7 @@ Identical until the name is entered. Then:
 
 ```
 Bot:   Peter Lorenz nie używa CourtDuo. Wyślij mu zaproszenie:
-       [SMS]  [WhatsApp]  [Telegram]
+       [WhatsApp]  [Telegram]
 ```
 
 Each button opens a share sheet with pre-written Polish invitation text and a link to the bot. **The recipient is chosen from the player's own phone contacts.** The bot never handles a number.
@@ -216,6 +216,8 @@ Reuses the exact invitation, the exact wording, and the exact three-button keybo
 > *Wpisz imię i nazwisko innej osoby.*
 
 Checked **before** the "does not use CourtDuo yet" refusal (scenario 2) — live testing showed a too-old player being told "nie używa jeszcze CourtDuo", which is true but not the reason that matters; the age reason is the real one and must be shown first. If the named player has no ranking rows at all, don't block on age — fall through to the rest of the checks; never guess an age.
+
+**"Does not use CourtDuo yet" isn't a total dead end either (step 8.5, PROBLEM 4).** Scenario 2's own flow (a stored pending invite, the "they joined" notification) is still build order step 9 — until then, this message carries the same WhatsApp/Telegram share buttons as "Zaproś na CourtDuo" (same generic share text, same link built from `get_me()`). The named player's name never goes into that share text or its buttons: the message could end up sent to anyone, and the bot must not be the one revealing who it was really meant for (rule 2).
 
 **If the named player already answered REJECTED or NOT_ATTENDING to an invitation from this same inviter for this same tournament** — refuse a re-invite:
 
