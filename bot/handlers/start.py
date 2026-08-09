@@ -7,9 +7,10 @@ returning account skips straight to tournament search.
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 from aiogram import Bot, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,12 +18,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.attempt_limiter import FailedAttemptLimiter
 from bot.handlers.tournament_search import start_tournament_search
 from bot.i18n import t
+from bot.invitation_text import gendered
 from bot.keyboards.navigation import persistent_menu_keyboard
 from bot.lang import DEFAULT_LANG, lang_for
+from bot.notifications import push
 from bot.pending_external_invites import notify_pending_external_invites
 from bot.registration import RegistrationOutcome, register_by_pzt_id
 from bot.states import Registration
-from core.text import first_name
+from bot.viewers import ViewerBindOutcome, bind_viewer
+from core.text import display_name, first_name
 from db import crud
 
 logger = logging.getLogger(__name__)
@@ -42,8 +46,36 @@ _FAILURE_MESSAGE_KEYS = {
 
 
 @router.message(CommandStart())
-async def handle_start(message: Message, state: FSMContext, session: AsyncSession) -> None:
+async def handle_start(
+    message: Message, state: FSMContext, session: AsyncSession, bot: Bot, command: CommandObject
+) -> None:
     await state.clear()
+
+    # CLAUDE.md step 10, GRANTING ACCESS: a deep-link payload
+    # (t.me/<bot>?start=<token>) binds the tapper as a read-only viewer of
+    # whichever player generated it. A used, expired or unknown token
+    # falls straight through to plain /start below -- "never errors" -- so
+    # this is deliberately not a branch that returns early on failure.
+    payload = (command.args or "").strip()
+    if payload:
+        bind_result = await bind_viewer(session, message.from_user.id, payload, datetime.now(timezone.utc))
+        if bind_result.outcome is ViewerBindOutcome.BOUND:
+            watched = bind_result.watched_account
+            # The viewer may or may not have a CourtDuo account of their
+            # own (CLAUDE.md step 10: the two roles are independent) --
+            # their own account's lang if they have one, DEFAULT_LANG
+            # otherwise, same fallback bot.lang.lang_for uses everywhere.
+            viewer_account = await crud.get_account_by_telegram_id(session, message.from_user.id)
+            viewer_lang = lang_for(viewer_account)
+            await message.answer(
+                gendered("viewer.bound", watched.gender, viewer_lang, name=display_name(watched.full_name))
+            )
+            await push(
+                bot,
+                watched.telegram_id,
+                t("viewer.player_notified_grant", lang_for(watched), telegram_name=message.from_user.full_name),
+            )
+            return
 
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     if account is not None:

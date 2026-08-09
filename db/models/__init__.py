@@ -8,6 +8,7 @@ autogenerate needs the full set of mapped classes registered on
 
 from __future__ import annotations
 
+from .account_viewers import AccountViewer, ViewerInviteToken
 from .accounts import Account
 from .base import Base
 from .enums import (
@@ -32,6 +33,8 @@ __all__ = [
     "Event",
     "Invitation",
     "PendingExternalInvite",
+    "AccountViewer",
+    "ViewerInviteToken",
     "AgeCategory",
     "Gender",
     "InvitationState",

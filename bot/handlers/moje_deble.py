@@ -37,6 +37,7 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.handlers.viewers import render_moje_deble_for_viewer
 from bot.i18n import all_translations, t
 from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard
 from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard, persistent_menu_keyboard
@@ -107,6 +108,13 @@ async def handle_moje_deble_command(message: Message, session: AsyncSession) -> 
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     lang = lang_for(account)
     if account is None:
+        # CLAUDE.md step 10: a Telegram account with no CourtDuo account
+        # of its own may still be a read-only viewer of one or more
+        # players -- checked before falling back to not_registered, so a
+        # viewer's /moje_deble opens the read-only screen instead of
+        # being told to /start.
+        if await render_moje_deble_for_viewer(message, session, message.from_user.id, lang):
+            return
         # Unlike the button, the command is typeable by anyone at any
         # time, including before /start has ever run -- so this can be a
         # session's very first message, one /start never reached (CLAUDE.md
@@ -148,6 +156,9 @@ async def handle_moje_deble_button_press(message: Message, session: AsyncSession
     account = await crud.get_account_by_telegram_id(session, message.from_user.id)
     lang = lang_for(account)
     if account is None:
+        # CLAUDE.md step 10: same viewer fallback as the command handler.
+        if await render_moje_deble_for_viewer(message, session, message.from_user.id, lang):
+            return
         await message.answer(t("moje_deble.not_registered", lang), reply_markup=persistent_menu_keyboard(lang))
         return
     await _render_and_send(message, session, account, lang)

@@ -77,6 +77,7 @@ from bot.lang import lang_for
 from bot.notifications import push
 from bot.states import InvitationSend, PartnerSelection
 from bot.tournament_search import label_for_tournament
+from bot.viewers import forward_to_viewers
 from core.text import display_name
 from db import crud
 from db.models import Account, Invitation, InvitationState
@@ -201,12 +202,14 @@ async def _notify_cancelled(
         if account is None:
             continue
         recipient_lang = account.lang or lang
+        cancelled_message = t("invitation.partner_found_elsewhere", recipient_lang)
         await push(
             bot,
             account.telegram_id,
-            t("invitation.partner_found_elsewhere", recipient_lang),
+            cancelled_message,
             reply_markup=persistent_menu_keyboard(recipient_lang),
         )
+        await forward_to_viewers(bot, session, account.id, cancelled_message)
 
 
 # --- Inviter: the confirmation screen ------------------------------------------
@@ -288,10 +291,15 @@ async def handle_confirm_send(
     # this exact message's answer buttons (bot.invitation_engine.cancel_invitation).
     invitation.invitee_message_id = delivered
     await session.commit()
-
-    await callback.message.answer(
-        sent_text(invitee.full_name, label, lang), reply_markup=invitation_sent_keyboard(lang)
+    # CLAUDE.md step 10: a copy to every viewer of each side, verbatim
+    # text, no buttons -- reuses the exact strings each player just saw.
+    await forward_to_viewers(
+        bot, session, invitee_account.id, invitation_text(account.full_name, label, invitee_account.lang or lang)
     )
+
+    sent_message = sent_text(invitee.full_name, label, lang)
+    await callback.message.answer(sent_message, reply_markup=invitation_sent_keyboard(lang))
+    await forward_to_viewers(bot, session, account.id, sent_message)
     # CLAUDE.md allows up to three pending invitations per tournament, and
     # a rejection frees the player to invite somebody else immediately —
     # so the tournament stays chosen and the name prompt stays live.
@@ -362,15 +370,19 @@ async def handle_accept(
     matched_pair = (invitation.inviter_pzt_id, invitation.invitee_pzt_id)
     await session.commit()
 
-    await callback.message.answer(matched_text(inviter_name, label, lang), reply_markup=persistent_menu_keyboard(lang))
+    accepter_message = matched_text(inviter_name, label, lang)
+    await callback.message.answer(accepter_message, reply_markup=persistent_menu_keyboard(lang))
+    await forward_to_viewers(bot, session, account.id, accepter_message)
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
+        inviter_message = accepted_inviter_text(account.full_name, account.gender, label, inviter_lang)
         await push(
             bot,
             inviter_account.telegram_id,
-            accepted_inviter_text(account.full_name, account.gender, label, inviter_lang),
+            inviter_message,
             reply_markup=persistent_menu_keyboard(inviter_lang),
         )
+        await forward_to_viewers(bot, session, inviter_account.id, inviter_message)
     await _notify_cancelled(bot, session, result, matched_pair, lang)
 
 
@@ -416,17 +428,19 @@ async def _handle_simple_answer(
     inviter_account, inviter_name = await _participant(session, invitation.inviter_pzt_id)
     await session.commit()
 
-    await callback.message.answer(
-        invitee_text(inviter_name, account.gender, label, lang), reply_markup=persistent_menu_keyboard(lang)
-    )
+    responder_message = invitee_text(inviter_name, account.gender, label, lang)
+    await callback.message.answer(responder_message, reply_markup=persistent_menu_keyboard(lang))
+    await forward_to_viewers(bot, session, account.id, responder_message)
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
+        inviter_message = inviter_text(account.full_name, account.gender, label, inviter_lang)
         await push(
             bot,
             inviter_account.telegram_id,
-            inviter_text(account.full_name, account.gender, label, inviter_lang),
+            inviter_message,
             reply_markup=persistent_menu_keyboard(inviter_lang),
         )
+        await forward_to_viewers(bot, session, inviter_account.id, inviter_message)
 
 
 @router.callback_query(RejectInvitationCallback.filter())
@@ -516,18 +530,20 @@ async def handle_cancel(
     invitee_message_id = invitation.invitee_message_id
     await session.commit()
 
-    await callback.message.answer(
-        cancelled_inviter_text(invitee_name, label, lang), reply_markup=persistent_menu_keyboard(lang)
-    )
+    canceller_message = cancelled_inviter_text(invitee_name, label, lang)
+    await callback.message.answer(canceller_message, reply_markup=persistent_menu_keyboard(lang))
+    await forward_to_viewers(bot, session, account.id, canceller_message)
 
     if invitee_account is not None:
         invitee_lang = invitee_account.lang or lang
+        invitee_message = cancelled_invitee_text(account.full_name, account.gender, label, invitee_lang)
         await push(
             bot,
             invitee_account.telegram_id,
-            cancelled_invitee_text(account.full_name, account.gender, label, invitee_lang),
+            invitee_message,
             reply_markup=persistent_menu_keyboard(invitee_lang),
         )
+        await forward_to_viewers(bot, session, invitee_account.id, invitee_message)
         if invitee_message_id is not None:
             # Best-effort: strips the three answer buttons off the
             # invitee's original notification so a cancelled invitation

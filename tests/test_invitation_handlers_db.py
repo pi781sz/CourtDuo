@@ -541,3 +541,148 @@ async def test_after_cancelling_the_inviter_may_re_invite_the_same_person(db_ses
     assert await crud.count_pending_outgoing_invitations(db_session, "CNH040", _GUID) == 0
     again = await send_invitation(db_session, anna, tournament, jagoda_player, _NOW)
     assert again.failure is None
+
+
+# --- CLAUDE.md step 10: read-only viewers get a copy, with no buttons -----------
+
+
+async def test_send_accept_reject_and_cancel_all_forward_to_each_sides_viewers(db_session: AsyncSession):
+    # One end-to-end pass through the whole invitation lifecycle, watched
+    # by a viewer on each side throughout -- proves every notification
+    # type CLAUDE.md step 10 lists is actually forwarded, verbatim and
+    # with no reply_markup, not just that the mechanism works once.
+    await _add_tournament(db_session)
+    await _add_user(db_session, "VWF001", "Testowa Anna", 9001)
+    await _add_user(db_session, "VWF002", "Testowa Jagoda", 9002)
+    anna = await crud.get_account_by_pzt_id(db_session, "VWF001")
+    jagoda = await crud.get_account_by_pzt_id(db_session, "VWF002")
+    await crud.add_viewer(db_session, anna.id, 9101)
+    await crud.add_viewer(db_session, jagoda.id, 9102)
+
+    bot = _make_bot()
+    await handle_confirm_send(_make_callback(9001), await _state_for(9001, _GUID, "VWF002"), db_session, bot)
+    pushed = _pushes(bot)
+    markups = _push_markups(bot)
+    # The inviter's own viewer sees exactly what Anna saw ("sent"); the
+    # invitee's own viewer sees exactly what Jagoda saw ("received") --
+    # never the other way round.
+    assert pushed[9101] == [f"Zaproszenie zostało wysłane. Czekaj na odpowiedź.\n🟠 Jagoda Testowa — {_LABEL}"]
+    assert markups[9101] == [None]
+    assert pushed[9102] == [
+        f"Anna Testowa zaprasza Cię do gry podwójnej.\n{_LABEL}\nUwaga: po akceptacji nie można zmienić partnera."
+    ]
+    assert markups[9102] == [None]
+
+    invitation = await crud.get_pending_invitation(db_session, "VWF001", "VWF002", _GUID)
+    bot = _make_bot()
+    await handle_accept(_make_callback(9002), AcceptInvitationCallback(invitation_id=invitation.id), db_session, bot)
+    pushed = _pushes(bot)
+    assert pushed[9102] == [f"🟢 Partner: Anna Testowa — {_LABEL}"]
+    assert pushed[9101] == ["Jagoda Testowa przyjęła zaproszenie.\n🟢 Partner: Jagoda Testowa — WTK Testowo - 22.08.2026"]
+    assert _push_markups(bot)[9101] == [None]
+    assert _push_markups(bot)[9102] == [None]
+
+
+async def test_reject_forwards_to_both_sides_viewers_with_no_buttons(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "VWF010", "Testowa Anna", 9010)
+    await _add_user(db_session, "VWF011", "Testowa Jagoda", 9011)
+    anna = await crud.get_account_by_pzt_id(db_session, "VWF010")
+    jagoda = await crud.get_account_by_pzt_id(db_session, "VWF011")
+    await crud.add_viewer(db_session, anna.id, 9110)
+    await crud.add_viewer(db_session, jagoda.id, 9111)
+    tournament = await crud.get_tournament_by_guid(db_session, _GUID)
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await crud.get_player_by_pzt_id(db_session, "VWF011"), _NOW)
+    ).invitation
+
+    bot = _make_bot()
+    await handle_reject(_make_callback(9011), RejectInvitationCallback(invitation_id=invitation.id), db_session, bot)
+
+    pushed = _pushes(bot)
+    assert pushed[9111] == [f"🔴 Odrzuciłaś zaproszenie od Anna Testowa — {_LABEL}."]
+    assert pushed[9110] == [f"🔴 Jagoda Testowa odrzuciła zaproszenie — {_LABEL}."]
+    markups = _push_markups(bot)
+    assert markups[9110] == [None]
+    assert markups[9111] == [None]
+
+
+async def test_not_attending_forwards_with_no_buttons(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "VWF020", "Testowa Anna", 9020)
+    await _add_user(db_session, "VWF021", "Testowa Jagoda", 9021)
+    anna = await crud.get_account_by_pzt_id(db_session, "VWF020")
+    await crud.add_viewer(db_session, anna.id, 9120)
+    tournament = await crud.get_tournament_by_guid(db_session, _GUID)
+    invitation = (
+        await send_invitation(db_session, anna, tournament, await crud.get_player_by_pzt_id(db_session, "VWF021"), _NOW)
+    ).invitation
+
+    bot = _make_bot()
+    await handle_not_attending(
+        _make_callback(9021), NotAttendingCallback(invitation_id=invitation.id), db_session, bot
+    )
+
+    pushed = _pushes(bot)
+    assert pushed[9120] == ["🔴 Jagoda Testowa nie jedzie na ten turniej."]
+    assert _push_markups(bot)[9120] == [None]
+
+
+async def test_cancel_forwards_to_both_sides_viewers(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "VWF030", "Testowa Anna", 9030)
+    await _add_user(db_session, "VWF031", "Testowa Jagoda", 9031)
+    anna = await crud.get_account_by_pzt_id(db_session, "VWF030")
+    jagoda = await crud.get_account_by_pzt_id(db_session, "VWF031")
+    await crud.add_viewer(db_session, anna.id, 9130)
+    await crud.add_viewer(db_session, jagoda.id, 9131)
+    bot = _make_bot()
+    await handle_confirm_send(_make_callback(9030), await _state_for(9030, _GUID, "VWF031"), db_session, bot)
+    invitation = await crud.get_pending_invitation(db_session, "VWF030", "VWF031", _GUID)
+
+    bot = _make_bot()
+    await handle_cancel(_make_callback(9030), CancelInvitationCallback(invitation_id=invitation.id), db_session, bot)
+
+    pushed = _pushes(bot)
+    assert pushed[9130] == [f"Anulowano zaproszenie do Jagoda Testowa — {_LABEL}."]
+    assert pushed[9131] == [f"Anna Testowa wycofała zaproszenie — {_LABEL}."]
+    markups = _push_markups(bot)
+    assert markups[9130] == [None]
+    assert markups[9131] == [None]
+
+
+async def test_a_revoked_viewer_receives_nothing(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "VWF040", "Testowa Anna", 9040)
+    await _add_user(db_session, "VWF041", "Testowa Jagoda", 9041)
+    anna = await crud.get_account_by_pzt_id(db_session, "VWF040")
+    await crud.add_viewer(db_session, anna.id, 9140)
+    viewer = (await crud.get_active_viewers_for_account(db_session, anna.id))[0]
+    await crud.revoke_viewer(db_session, anna.id, viewer.id, _NOW)
+
+    bot = _make_bot()
+    await handle_confirm_send(_make_callback(9040), await _state_for(9040, _GUID, "VWF041"), db_session, bot)
+
+    assert 9140 not in _pushes(bot)
+
+
+async def test_the_znalazl_juz_partnera_cancellation_notice_is_forwarded_too(db_session: AsyncSession):
+    await _add_tournament(db_session)
+    await _add_user(db_session, "VWF050", "Testowa Anna", 9050)
+    await _add_user(db_session, "VWF051", "Testowa Jagoda", 9051)
+    await _add_user(db_session, "VWF052", "Testowa Ola", 9052)
+    tournament = await crud.get_tournament_by_guid(db_session, _GUID)
+    anna = await crud.get_account_by_pzt_id(db_session, "VWF050")
+    ola = await crud.get_account_by_pzt_id(db_session, "VWF052")
+    await crud.add_viewer(db_session, ola.id, 9152)
+    chosen = (
+        await send_invitation(db_session, anna, tournament, await crud.get_player_by_pzt_id(db_session, "VWF051"), _NOW)
+    ).invitation
+    await send_invitation(db_session, anna, tournament, await crud.get_player_by_pzt_id(db_session, "VWF052"), _NOW)
+
+    bot = _make_bot()
+    await handle_accept(_make_callback(9051), AcceptInvitationCallback(invitation_id=chosen.id), db_session, bot)
+
+    pushed = _pushes(bot)
+    assert pushed[9152] == ["Ten zawodnik znalazł już partnera."]
+    assert _push_markups(bot)[9152] == [None]
