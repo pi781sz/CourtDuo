@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import date
 
 from bot.handlers.tournament_search import _results_text
-from bot.keyboards.navigation import FindPartnerCallback, MenuCallback, MojeDebleCallback
+from bot.keyboards.navigation import FindPartnerCallback, MojeDebleCallback
 from bot.keyboards.tournament_search import (
     ChangeCategoryCallback,
     ChangePlaceCallback,
@@ -93,14 +93,14 @@ def test_every_post_category_keyboard_offers_change_category():
         assert change_category_prefix in _callback_prefixes(markup), f"{name} is missing change-category"
 
 
-def test_none_eligible_keyboard_offers_menu_too():
-    # CLAUDE.md build order step 8.2: "no tournaments eligible at all" is a
-    # terminal message, so [Menu] is offered alongside the category change.
+def test_none_eligible_keyboard_offers_only_change_category():
+    # CLAUDE.md step 8.4: no [Menu] button any more -- the persistent
+    # reply keyboard is always visible below the input box, so the only
+    # button left here is the one real choice, "Zmień kategorię wiekową".
     markup = none_eligible_keyboard("pl")
 
     texts = _all_button_texts(markup)
-    assert "🔵 Menu" in texts
-    assert MenuCallback.__prefix__ in _callback_prefixes(markup)
+    assert texts == ["Zmień kategorię wiekową"]
 
 
 def test_no_matches_keyboard_still_offers_show_all_and_change_place():

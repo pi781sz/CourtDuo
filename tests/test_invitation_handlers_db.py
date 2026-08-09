@@ -26,7 +26,6 @@ from bot.handlers.invitations import (
     handle_not_attending,
     handle_reject,
 )
-from bot.handlers.navigation import handle_menu
 from bot.invitation_engine import send_invitation
 from bot.keyboards.invitations import (
     AcceptInvitationCallback,
@@ -179,18 +178,14 @@ async def test_confirming_sends_the_invitation_to_the_invitee(db_session: AsyncS
         f"Anna Testowa zaprasza Cię do gry podwójnej.\n{_LABEL}\n"
         "Uwaga: po akceptacji nie można zmienić partnera."
     )
-    # Four buttons and no text entry: Zatwierdź, Odrzuć, Nie jadę, Menu.
+    # Three buttons and no text entry: Zatwierdź, Odrzuć, Nie jadę na ten
+    # turniej -- no emoji, no Menu (CLAUDE.md step 8.4, CHANGE 1 and 3).
     markup = bot.send_message.call_args.kwargs["reply_markup"]
-    assert _button_texts(markup) == [
-        "✅ Zatwierdź",
-        "❌ Odrzuć",
-        "⛔ Nie jadę na ten turniej",
-        "🔵 Menu",
-    ]
+    assert _button_texts(markup) == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
     assert _answers(callback) == [f"Zaproszenie zostało wysłane. Czekaj na odpowiedź.\n🟠 Jagoda Testowa — {_LABEL}"]
-    # CLAUDE.md build order step 8: found live -- this message used to end
-    # the flow with no keyboard at all, leaving the player stuck.
-    assert _button_texts(_answer_markups(callback)[0]) == ["🔵 Menu"]
+    # CLAUDE.md step 8.4: no inline navigation button any more -- the
+    # persistent reply keyboard is always visible below the input box.
+    assert _answer_markups(callback)[0] is None
     assert await crud.count_pending_outgoing_invitations(db_session, "HND001", _GUID) == 1
     # Free to name somebody else straight away, up to three pending.
     assert await state.get_state() == PartnerSelection.waiting_name.state
@@ -257,7 +252,7 @@ async def test_confirming_send_when_the_invitee_already_invited_meanwhile_is_ref
     assert _answers(callback) == [
         "Masz już zaproszenie od Jagoda Testowa na ten turniej. Sprawdź „Moje deble”, aby odpowiedzieć."
     ]
-    assert _button_texts(_answer_markups(callback)[0]) == ["🔵 Menu"]
+    assert _answer_markups(callback)[0] is None
     assert bot.send_message.await_count == 0
     assert await crud.count_pending_outgoing_invitations(db_session, "HND080", _GUID) == 0
     assert await crud.count_pending_outgoing_invitations(db_session, "HND081", _GUID) == 1
@@ -287,8 +282,8 @@ async def test_accept_tells_both_sides_and_every_cancelled_player(db_session: As
     await handle_accept(callback, AcceptInvitationCallback(invitation_id=chosen.id), db_session, bot)
 
     assert _answers(callback) == [f"🟢 Partner: Anna Testowa — {_LABEL}"]
-    # A successful match is a terminal message: a way back (CLAUDE.md, step 7.1).
-    assert _button_texts(_answer_markups(callback)[0]) == ["🔵 Menu"]
+    # CLAUDE.md step 8.4: no inline navigation button any more.
+    assert _answer_markups(callback)[0] is None
     pushed = _pushes(bot)
     # The inviter: the alert, then her own 🟢 status. Feminine verb.
     assert pushed[8030] == [f"Jagoda Testowa przyjęła zaproszenie.\n🟢 Partner: Jagoda Testowa — {_LABEL}"]
@@ -297,7 +292,7 @@ async def test_accept_tells_both_sides_and_every_cancelled_player(db_session: As
     assert pushed[8033] == ["Ten zawodnik znalazł już partnera."]
     assert set(pushed) == {8030, 8032, 8033}
     push_markups = _push_markups(bot)
-    assert all(_button_texts(markup) == ["🔵 Menu"] for markups in push_markups.values() for markup in markups)
+    assert all(markup is None for markups in push_markups.values() for markup in markups)
 
 
 async def test_accept_still_matches_when_the_inviter_has_blocked_the_bot(db_session: AsyncSession):
@@ -347,10 +342,10 @@ async def test_reject_tells_the_inviter_with_the_right_verb_for_a_boy(db_session
     await handle_reject(callback, RejectInvitationCallback(invitation_id=invitation.id), db_session, bot)
 
     assert _answers(callback) == [f"🔴 Odrzuciłeś zaproszenie od Adam Testowy — {_LABEL}."]
-    # A rejection ends the flow for both sides: each gets a way back.
-    assert _button_texts(_answer_markups(callback)[0]) == ["🔵 Menu"]
+    # CLAUDE.md step 8.4: no inline navigation button any more.
+    assert _answer_markups(callback)[0] is None
     assert _pushes(bot)[8050] == [f"🔴 Marek Testowy odrzucił zaproszenie — {_LABEL}."]
-    assert _button_texts(_push_markups(bot)[8050][0]) == ["🔵 Menu"]
+    assert _push_markups(bot)[8050][0] is None
     assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.REJECTED
 
 
@@ -369,10 +364,10 @@ async def test_not_attending_tells_the_inviter_something_neutral(db_session: Asy
     await handle_not_attending(callback, NotAttendingCallback(invitation_id=invitation.id), db_session, bot)
 
     assert _answers(callback) == ["Odpowiedziałaś, że nie jedziesz na ten turniej."]
-    assert _button_texts(_answer_markups(callback)[0]) == ["🔵 Menu"]
+    assert _answer_markups(callback)[0] is None
     # 🔴, same colour as a refusal now (CLAUDE.md step 8.3, PROBLEM 2).
     assert _pushes(bot)[8060] == ["🔴 Jagoda Testowa nie jedzie na ten turniej."]
-    assert _button_texts(_push_markups(bot)[8060][0]) == ["🔵 Menu"]
+    assert _push_markups(bot)[8060][0] is None
     assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.NOT_ATTENDING
 
 
@@ -397,28 +392,5 @@ async def test_answering_an_already_cancelled_invitation_says_so_without_changin
     await handle_accept(callback, AcceptInvitationCallback(invitation_id=to_ola.id), db_session, _make_bot())
 
     assert _answers(callback) == ["Ten zawodnik znalazł już partnera."]
-    assert _button_texts(_answer_markups(callback)[0]) == ["🔵 Menu"]
+    assert _answer_markups(callback)[0] is None
     assert (await crud.get_invitation_by_id(db_session, to_ola.id)).state is InvitationState.CANCELLED
-
-
-async def test_tapping_menu_on_an_invitation_leaves_it_pending_and_still_answerable(db_session: AsyncSession):
-    # CLAUDE.md step 8.3, PROBLEM 3: Menu is a fourth button on the
-    # invitation itself, and tapping it must not answer the invitation.
-    await _add_tournament(db_session)
-    await _add_user(db_session, "HND090", "Testowa Anna", 8090)
-    await _add_user(db_session, "HND091", "Testowa Jagoda", 8091)
-    tournament = await crud.get_tournament_by_guid(db_session, _GUID)
-    anna = await crud.get_account_by_pzt_id(db_session, "HND090")
-    invitation = (
-        await send_invitation(db_session, anna, tournament, await crud.get_player_by_pzt_id(db_session, "HND091"), _NOW)
-    ).invitation
-
-    await handle_menu(_make_callback(8091), db_session)
-
-    assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.PENDING
-
-    # Still answerable afterwards, from the same (unchanged) invitation.
-    callback = _make_callback(8091)
-    await handle_accept(callback, AcceptInvitationCallback(invitation_id=invitation.id), db_session, _make_bot())
-
-    assert (await crud.get_invitation_by_id(db_session, invitation.id)).state is InvitationState.ACCEPTED

@@ -1,16 +1,14 @@
 """/moje_deble and the "Moje deble" button (CLAUDE.md, "Moje deble" status
-view; build order step 8, reworked by step 8.1): one place a player sees
-every invitation they have sent or received. Reachable two ways -- the
-command and the button every terminal message now carries
-(bot.keyboards.navigation.terminal_keyboard) -- both routed through the
-same rendering here.
+view; build order step 8, reworked by step 8.1, and by step 8.4). Reachable
+three ways -- the command, the age-category screen's inline button, and the
+"Moje deble" label on the persistent reply keyboard (CLAUDE.md step 8.4) --
+all routed through the same rendering here.
 
 Carries no state filter, like bot.handlers.navigation.handle_find_partner:
-the button can follow a pushed notification or a terminal message from any
-flow, so the player may be in any FSM state, or none, when they tap it.
-Unlike "Znajdź partnera", looking at this view doesn't change anything
-about where the player was, so the state is left untouched rather than
-reset.
+the button can follow a pushed notification or arrive mid any flow, so the
+player may be in any FSM state, or none, when they tap it. Unlike "Znajdź
+partnera", looking at this view doesn't change anything about where the
+player was, so the state is left untouched rather than reset.
 
 Step 8.1: a pending received invitation can't hang its buttons off the one
 summary message any more (there can be several, and they'd need to be
@@ -27,13 +25,13 @@ import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.i18n import t
+from bot.i18n import all_translations, t
 from bot.keyboards.invitations import invitation_answer_keyboard
 from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard
 from bot.lang import lang_for
@@ -116,3 +114,17 @@ async def handle_moje_deble_button(callback: CallbackQuery, session: AsyncSessio
         logger.warning("Moje deble tapped with no account: telegram_id=%s", callback.from_user.id)
         return
     await _render_and_send(callback.message, session, account, lang)
+
+
+@router.message(F.text.in_(all_translations("common.moje_deble_button")))
+async def handle_moje_deble_button_press(message: Message, session: AsyncSession) -> None:
+    """CLAUDE.md step 8.4: the persistent reply keyboard's "Moje deble"
+    label. Unlike the command, this can arrive before /start's account
+    exists (registration in progress) -- same not_registered fallback as
+    the command gets."""
+    account = await crud.get_account_by_telegram_id(session, message.from_user.id)
+    lang = lang_for(account)
+    if account is None:
+        await message.answer(t("moje_deble.not_registered", lang))
+        return
+    await _render_and_send(message, session, account, lang)

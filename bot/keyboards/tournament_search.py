@@ -14,7 +14,7 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.i18n import t
-from bot.keyboards.navigation import FindPartnerCallback, MenuCallback, MojeDebleCallback
+from bot.keyboards.navigation import FindPartnerCallback, MojeDebleCallback
 from bot.tournament_search import (
     TournamentOption,
     categories_for_own_category,
@@ -91,10 +91,9 @@ def none_eligible_keyboard(lang: str) -> InlineKeyboardMarkup:
     """Shown with "none_eligible" (CLAUDE.md step 5.3): zero tournaments
     match this category at all, so "Zmień miejscowość" would only lead to
     the same dead end again — only a category change can help. CLAUDE.md
-    step 8.2 classifies this message as terminal ("no tournaments eligible
-    at all"), so [Menu] is offered alongside the category change."""
+    step 8.4: no [Menu] button needed alongside it any more -- the
+    persistent reply keyboard is always visible below the input box."""
     builder = InlineKeyboardBuilder()
     builder.button(text=t("tournament_search.change_category", lang), callback_data=ChangeCategoryCallback())
-    builder.button(text=t("common.menu_button", lang), callback_data=MenuCallback())
     builder.adjust(1)
     return builder.as_markup()

@@ -65,7 +65,6 @@ from bot.keyboards.invitations import (
     RejectInvitationCallback,
     invitation_answer_keyboard,
 )
-from bot.keyboards.navigation import terminal_keyboard
 from bot.lang import lang_for
 from bot.notifications import push
 from bot.states import InvitationSend, PartnerSelection
@@ -101,21 +100,6 @@ _SEND_FAILURE_KEYS: dict[SendFailure, str] = {
 # prompt (CLAUDE.md, "Never dead-end").
 _SEND_FAILURES_RESTARTING_SEARCH = frozenset(
     {SendFailure.INVITER_ALREADY_MATCHED, SendFailure.TOURNAMENT_UNAVAILABLE}
-)
-
-# CLAUDE.md build order step 8.2: which send failures end the attempt (get
-# [Menu]) versus leave the player retyping a name in the same flow (get no
-# navigation button — the message itself says "Wpisz imię i nazwisko innej
-# osoby."). Mirrors bot.partner_selection._CHECK_FAILURE_TERMINAL for the
-# three failure kinds both dicts share.
-_SEND_FAILURES_TERMINAL = frozenset(
-    {
-        SendFailure.NOT_ENTITLED,
-        SendFailure.INVITER_ALREADY_MATCHED,
-        SendFailure.PENDING_INVITATION_EXISTS,
-        SendFailure.ALREADY_INVITED_BY_INVITEE,
-        SendFailure.MAX_PENDING_REACHED,
-    }
 )
 
 _RESPOND_FAILURE_KEYS: dict[RespondFailure, str] = {
@@ -185,12 +169,7 @@ async def _notify_cancelled(
         if account is None:
             continue
         recipient_lang = account.lang or lang
-        await push(
-            bot,
-            account.telegram_id,
-            t("invitation.partner_found_elsewhere", recipient_lang),
-            reply_markup=terminal_keyboard(recipient_lang),
-        )
+        await push(bot, account.telegram_id, t("invitation.partner_found_elsewhere", recipient_lang))
 
 
 # --- Inviter: the confirmation screen ------------------------------------------
@@ -228,11 +207,7 @@ async def handle_confirm_send(
         name = invitee.full_name
         if result.inviter_partner_pzt_id is not None:
             _, name = await _participant(session, result.inviter_partner_pzt_id)
-        reply_markup = terminal_keyboard(lang) if result.failure in _SEND_FAILURES_TERMINAL else None
-        await callback.message.answer(
-            t(_SEND_FAILURE_KEYS[result.failure], lang, name=display_name(name)),
-            reply_markup=reply_markup,
-        )
+        await callback.message.answer(t(_SEND_FAILURE_KEYS[result.failure], lang, name=display_name(name)))
         if result.failure in _SEND_FAILURES_RESTARTING_SEARCH:
             await start_tournament_search(callback.message, state, lang, session, account)
             return
@@ -264,12 +239,7 @@ async def handle_confirm_send(
         await state.set_state(PartnerSelection.waiting_name)
         return
 
-    # CLAUDE.md build order step 8: found live -- this message ended a flow
-    # (the invitation is sent, there is nothing more to type until someone
-    # answers) with no keyboard at all. The player's natural next questions
-    # are "what did I send?" and "can I invite someone else?", which is
-    # exactly what these two buttons answer.
-    await callback.message.answer(sent_text(invitee.full_name, label, lang), reply_markup=terminal_keyboard(lang))
+    await callback.message.answer(sent_text(invitee.full_name, label, lang))
     # CLAUDE.md allows up to three pending invitations per tournament, and
     # a rejection frees the player to invite somebody else immediately —
     # so the tournament stays chosen and the name prompt stays live.
@@ -304,9 +274,7 @@ async def handle_accept(
     await _clear_buttons(callback)
     await callback.answer()
     if account is None:
-        await callback.message.answer(
-            t("invitation.no_longer_valid", lang), reply_markup=terminal_keyboard(lang)
-        )
+        await callback.message.answer(t("invitation.no_longer_valid", lang))
         return
 
     result = await accept_invitation(session, callback_data.invitation_id, account.pzt_id, _now())
@@ -324,13 +292,10 @@ async def handle_accept(
                 )
                 _, partner_name = await _participant(session, partner_pzt_id)
                 await callback.message.answer(
-                    t("partner_selection.inviter_already_matched", lang, name=display_name(partner_name)),
-                    reply_markup=terminal_keyboard(lang),
+                    t("partner_selection.inviter_already_matched", lang, name=display_name(partner_name))
                 )
                 return
-        await callback.message.answer(
-            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=terminal_keyboard(lang)
-        )
+        await callback.message.answer(t(_RESPOND_FAILURE_KEYS[result.failure], lang))
         return
 
     invitation = result.invitation
@@ -340,14 +305,13 @@ async def handle_accept(
     matched_pair = (invitation.inviter_pzt_id, invitation.invitee_pzt_id)
     await session.commit()
 
-    await callback.message.answer(matched_text(inviter_name, label, lang), reply_markup=terminal_keyboard(lang))
+    await callback.message.answer(matched_text(inviter_name, label, lang))
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
         await push(
             bot,
             inviter_account.telegram_id,
             accepted_inviter_text(account.full_name, account.gender, label, inviter_lang),
-            reply_markup=terminal_keyboard(inviter_lang),
         )
     await _notify_cancelled(bot, session, result, matched_pair, lang)
 
@@ -375,17 +339,13 @@ async def _handle_simple_answer(
     await _clear_buttons(callback)
     await callback.answer()
     if account is None:
-        await callback.message.answer(
-            t("invitation.no_longer_valid", lang), reply_markup=terminal_keyboard(lang)
-        )
+        await callback.message.answer(t("invitation.no_longer_valid", lang))
         return
 
     result = await answer(session, invitation_id, account.pzt_id, _now())
     if result.failure is not None:
         await session.commit()
-        await callback.message.answer(
-            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=terminal_keyboard(lang)
-        )
+        await callback.message.answer(t(_RESPOND_FAILURE_KEYS[result.failure], lang))
         return
 
     invitation = result.invitation
@@ -394,16 +354,13 @@ async def _handle_simple_answer(
     inviter_account, inviter_name = await _participant(session, invitation.inviter_pzt_id)
     await session.commit()
 
-    await callback.message.answer(
-        invitee_text(inviter_name, account.gender, label, lang), reply_markup=terminal_keyboard(lang)
-    )
+    await callback.message.answer(invitee_text(inviter_name, account.gender, label, lang))
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
         await push(
             bot,
             inviter_account.telegram_id,
             inviter_text(account.full_name, account.gender, label, inviter_lang),
-            reply_markup=terminal_keyboard(inviter_lang),
         )
 
 

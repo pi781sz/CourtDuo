@@ -18,7 +18,7 @@ Every user is a junior player aged roughly 10–18.
 
 Do not implement anything that violates these. If a request would break one, say so instead of building it.
 
-1. **No free-text messaging between users. Ever.** Every interaction is inline keyboard buttons and pre-defined messages. No chat, no message relay, no "add a note" field. An invitation carries only: inviter name, tournament, date, and buttons — Zatwierdź, Odrzuć, (per the spec change under "Invitation engine") Nie jadę na ten turniej, and a Menu button that lets the recipient step away without answering — the invitation stays PENDING either way.
+1. **No free-text messaging between users. Ever.** Every interaction is inline keyboard buttons, the persistent reply keyboard, and pre-defined messages. No chat, no message relay, no "add a note" field. An invitation carries only: inviter name, tournament, date, and buttons — Zatwierdź, Odrzuć, (per the spec change under "Invitation engine") Nie jadę na ten turniej. The recipient can step away without answering at any time via the persistent reply keyboard (see "Navigation") — the invitation stays PENDING either way.
 
 2. **The bot never looks up, stores, or displays a phone number.** In the "invite a non-user" flow the bot generates share text; the phone's own contact picker chooses the recipient. The bot never sees who it went to.
 
@@ -52,6 +52,23 @@ Gender is derived from which ranking list the player appears in:
 
 ---
 
+## Navigation
+
+**A persistent reply keyboard, not an inline [Menu] button.** The keyboard that sits below the text input and stays there between messages (`ReplyKeyboardMarkup`, `resize_keyboard` + `is_persistent`):
+
+```
+[Znajdź partnera]
+[Moje deble]  [Zaproś na CourtDuo]
+```
+
+Attached once, on `/start` — for a brand new registration, on the very first greeting; for a returning player, on the greeting that precedes the age-category screen — so it is present for the whole session from the first message on. Tapping a label sends it back as an ordinary text message; `bot.i18n.all_translations` matches that text against every locale's rendering of the label (not just the account's own language), and those handlers are registered ahead of the state-scoped ones (place, partner name, PZT id) so a tap always wins even mid-flow.
+
+This replaces the inline `[Menu]` button and its two-option chooser that earlier steps used: no message anywhere needs a navigation button of its own any more, because the three actions are already one tap away, always. Inline keyboards for actual **choices** — category buttons, tournament lists, disambiguation, the invitation's three answer buttons — stay inline and unchanged; the reply keyboard only ever carries these three fixed actions.
+
+**Zaproś na CourtDuo** — a generic invite, unattached to any tournament or named player. Sends WhatsApp and Telegram share buttons (both plain `https://` URLs — Telegram inline buttons accept nothing else, so there is no SMS button) pre-filled with a short Polish invitation and a link built from the bot's own username (`get_me()`, fetched at runtime — never hardcoded, so the same code is correct for the test and production bots). The SMS case is a copyable line in the message body instead of a broken button. The bot never sees, stores or handles a phone number here either (rule 2) — the recipient is chosen in the player's own phone/app. This is **not** step 9's flow: no `pending_external_invites` row, no "they joined" callback, nothing tournament- or player-specific.
+
+---
+
 ## User journeys
 
 ### Scenario 1 — invite a player who already uses CourtDuo
@@ -81,10 +98,10 @@ Adam Smith zaprasza Cię do gry podwójnej.
 <tournament name>
 <date>
 Uwaga: po akceptacji nie można zmienić partnera.
-[✅ Zatwierdź]  [❌ Odrzuć]  [⛔ Nie jadę na ten turniej]  [🔵 Menu]
+[Zatwierdź]  [Odrzuć]  [Nie jadę na ten turniej]
 ```
 
-Telegram can't colour a button, so each answer carries a leading icon instead (✅/❌/⛔), and `[🔵 Menu]` alongside them lets Peter step away — check something else first, look at Moje deble — without answering; the invitation stays PENDING and is answerable later from there (step 8.3).
+Peter's persistent reply keyboard (see "Navigation") is still there below the input box the whole time, so he can check something else first — look at Moje deble — without answering; the invitation stays PENDING and is answerable later from there (step 8.3).
 
 **On Zatwierdź** — both see 🟢 with tournament, date and partner name. Adam gets an alert: *"Peter Lorenz przyjął zaproszenie."*
 
@@ -187,9 +204,9 @@ Never reveal **who** that partner is — it is not the inviter's business.
 **If the named player already has a pending invitation to *this* player for the same tournament** — don't create a second invitation chasing the same pair. Redirect the inviter to the answer they already owe instead of blocking them outright:
 
 > *Masz już zaproszenie od Peter Lorenz na ten turniej.*
-> *[✅ Zatwierdź]  [❌ Odrzuć]  [⛔ Nie jadę na ten turniej]  [🔵 Menu]*
+> *[Zatwierdź]  [Odrzuć]  [Nie jadę na ten turniej]*
 
-Reuses the exact invitation, the exact wording, and the exact four-button keyboard the original notification carries — the player can simply accept it. Enforced twice: once here as a friendly pre-check, and again inside the send transaction itself (`SendFailure.ALREADY_INVITED_BY_INVITEE`), since the other player may have sent their invitation moments after this check ran.
+Reuses the exact invitation, the exact wording, and the exact three-button keyboard the original notification carries — the player can simply accept it. Enforced twice: once here as a friendly pre-check, and again inside the send transaction itself (`SendFailure.ALREADY_INVITED_BY_INVITEE`), since the other player may have sent their invitation moments after this check ran.
 
 **If the named player's gender does not match the event:** refuse and explain.
 
@@ -247,7 +264,7 @@ An invitation gets a third button alongside Zatwierdź and Odrzuć: **"Nie jadę
 
 ## Status display — "Moje deble"
 
-One place a player sees every invitation they have sent or received, and what happened to it. Reachable three ways: the `/moje_deble` command, "Moje deble" from the [Menu] chooser every terminal message opens (see "Buttons only at the end" below), and the "Moje deble" button carried directly by the age-category screen.
+One place a player sees every invitation they have sent or received, and what happened to it. Reachable three ways: the `/moje_deble` command, the "Moje deble" label on the persistent reply keyboard (see "Navigation"), and the "Moje deble" button carried directly by the age-category screen.
 
 The summary message opens with a short heading (`Moje deble`) as its first line, so a player scrolling back through the chat knows what they're looking at without having to reread it — the age-category screen gets the same treatment, headed `Znajdź partnera`. A heading, not a paragraph.
 
@@ -262,14 +279,14 @@ Two collapsing rules apply before anything is rendered:
 Moje deble
 
 SS Kraków - 05.09.2026
-🟠 Zaproszenie od: Wiktoria Wójcik
+🟠 Wiktoria Wójcik — zaprasza
 
 OTK Zielona Góra - 29.08.2026
-🟠 Wysłane do: Maja Nowak
-🔴 Odmowa: Bartosz Nowak
+🟠 Maja Nowak — wysłane
+🔴 Bartosz Nowak — odmowa
 
 WTK Uniejów - 22.08.2026
-🟢 Gracie razem: Jagoda Szewczyk
+🟢 Jagoda Szewczyk — gracie razem
 ```
 
 *(Groups above are ordered by their own last activity, oldest first — not by the tournament dates shown, which happen to run the other way in this example.)*
@@ -280,11 +297,11 @@ Colours — one lookup (`bot.formatting.STATUS_EMOJI`), every message routes thr
 - 🔴 not happening (rejected, or not attending — the wording carries which, the colour doesn't need to)
 - 🟢 matched
 
-**Button icons.** Telegram's inline-keyboard buttons have no colour or style field, so the three invitation answers and Menu carry a leading emoji instead: ✅ Zatwierdź, ❌ Odrzuć, ⛔ Nie jadę na ten turniej, 🔵 Menu — everywhere these actions appear, including the per-invitation follow-up messages here. Every other button (Znajdź partnera, Moje deble, Zmień miejscowość, Zmień kategorię wiekową, the tournament/category lists) stays plain — if everything is decorated, nothing stands out.
+**No button icons.** The three invitation answers — Zatwierdź, Odrzuć, Nie jadę na ten turniej — are plain text, same as every other button (Znajdź partnera, Moje deble, Zmień miejscowość, Zmień kategorię wiekową, the tournament/category lists). Status colour lives in the message *text* (🟠/🔴/🟢 via `STATUS_EMOJI`, above) — decorating the buttons too just crowds the keyboard without adding information.
 
-Both directions are shown — invitations this player sent and ones they received — and direction is carried by the phrase at the *start* of the line, not a trailing explanation: `Wysłane do: {name}` for a sent one, `Zaproszenie od: {name}` for a received one, `Odmowa: {name}` when they refused a sent invitation, and so on — status word first, name last, one line each. A matched line (`Gracie razem: {name}`) is symmetric regardless of who invited whom.
+Both directions are shown — invitations this player sent and ones they received — and the name leads every line, status word after it: `{name} — wysłane` for a sent one, `{name} — zaprasza` for a received one, `{name} — odmowa` when they refused a sent invitation, and so on — name first, status last, one line each. The name is what a player scans for; direction still reads unambiguously off the status word alone. A matched line (`{name} — gracie razem`) is symmetric regardless of who invited whom. This same name-first order applies anywhere else a name and status appear together, not just here.
 
-**A pending received invitation can't hang its buttons off the summary.** There can be more than one, and a single message can't carry more than one invitation's worth of buttons unambiguously. So: the summary is sent as one message, then every still-open received invitation gets its own follow-up message, each carrying the same four-button invitation keyboard the original notification carries — Zatwierdź / Odrzuć / "Nie jadę na ten turniej" / Menu — reusing step 7's own callback classes and handlers unchanged. No follow-up messages at all when there is nothing pending to answer. A player who dismissed the original notification is not stuck hunting for it.
+**A pending received invitation can't hang its buttons off the summary.** There can be more than one, and a single message can't carry more than one invitation's worth of buttons unambiguously. So: the summary is sent as one message, then every still-open received invitation gets its own follow-up message, each carrying the same three-button invitation keyboard the original notification carries — Zatwierdź / Odrzuć / "Nie jadę na ten turniej" — reusing step 7's own callback classes and handlers unchanged. No follow-up messages at all when there is nothing pending to answer. A player who dismissed the original notification is not stuck hunting for it — the persistent reply keyboard (see "Navigation") gets them back to Moje deble any time.
 
 **What it hides.** Only tournaments that have not finished. Use `date_to` where present, otherwise `date_from`; a tournament is over at the end of that day, Europe/Warsaw. Nothing is deleted from the database — this is a display filter only, so past invitations stay available for the results-based verification planned later. Invitations cancelled automatically when someone else accepted are noise, not history, and are never listed — the player was already told at the time.
 
@@ -292,13 +309,11 @@ Both directions are shown — invitations this player sent and ones they receive
 
 **Never** reveals who a third party's partner is — only this player's own matches. If another player is matched with someone else at a tournament, this view never names that someone else.
 
-**Buttons only at the end.** "Never dead-end" (see "Tournament selection") does not mean every message needs a keyboard — a mid-flow prompt like "Wpisz imię i nazwisko osoby, z którą chcesz grać." followed by navigation buttons is clutter that invites mis-taps, since those buttons would abandon the flow the player is already in.
+**No message needs a navigation button of its own.** Earlier steps attached an inline `[Menu]` button to every terminal message — one that ended a flow with nothing else to tap — since a mid-flow prompt like "Wpisz imię i nazwisko osoby, z którą chcesz grać." followed by navigation buttons is clutter that invites mis-taps, and there was otherwise no way back. The persistent reply keyboard (see "Navigation") replaces that entirely: it is always visible below the input box, on both terminal and mid-flow messages alike, so no individual message — terminal or mid-flow — carries a navigation button any more. A message keeps whatever flow-specific buttons it already had (a tournament list, a category list, a disambiguation list, "Zmień miejscowość", "Zmień kategorię wiekową", "Pokaż wszystkie turnieje", the invitation's three answer buttons) and nothing else is added.
 
-The rule: a message carries the `[Menu]` navigation button (`bot.keyboards.navigation.terminal_keyboard`) only when the journey has **ended** and the player has no next step in the current flow — a sent invitation, an accept/reject/"nie jadę" outcome on either side, "ten zawodnik znalazł już partnera", "masz już partnera na ten turniej", zero tournaments eligible for a category, the Moje deble summary, or any refusal that genuinely ends the attempt (tells the player to wait, not to type again). A **mid-flow** message — the next thing expected is the player typing or tapping something in the same flow, including a refusal that says "Wpisz imię i nazwisko innej osoby" — carries no navigation button at all; if it already has flow-specific buttons of its own (a tournament list, a category list, a disambiguation list, "Zmień miejscowość", "Zmień kategorię wiekową", "Pokaż wszystkie turnieje"), those stay and nothing is added.
+`/start` must never be the only way forward — it isn't: `Znajdź partnera` on the persistent keyboard returns the player straight to the age-category screen from anywhere.
 
-Tapping `[Menu]` opens one small chooser message with `[Znajdź partnera]` and `[Moje deble]` — one navigation entry point instead of two buttons stamped on every terminal screen. `Znajdź partnera` returns the player straight to the age-category screen. `/start` must never be the only way forward.
-
-`tests/test_no_dead_ends.py` checks this mechanically for every statically-traceable message (one passed to `t()` with a literal locale key) across `bot/`: a message on the terminal list must carry some navigation keyboard, and a message on the mid-flow list must never carry `[Menu]`. Messages composed by helper functions (`sent_text()`, `matched_text()`, ...) or chosen through a dict keyed by an enum aren't traceable this way and are instead covered by the handler-level tests in `tests/test_*_db.py`, which assert the actual buttons a real handler call produces.
+`tests/test_no_dead_ends.py` checks mechanically that none of the old inline-`[Menu]` machinery (`MenuCallback`, `terminal_keyboard`, `menu_keyboard`, the literal "🔵 Menu" button text) has crept back in anywhere under `bot/`. Actual button contents on any given message are covered by the handler-level tests in `tests/test_*_db.py` and the keyboard-builder tests in `tests/test_*_keyboards.py`, which assert what a real handler call or keyboard builder actually produces.
 
 ---
 

@@ -1,17 +1,16 @@
-"""Tests for the [Menu] / "Znajdź partnera" / "Moje deble" navigation
-keyboards (CLAUDE.md, step 7.1, "a way back", reworked by build order step
-8.2 into a single entry point). Pure -- no database, no Telegram.
+"""Tests for the persistent reply keyboard and the "Znajdź partnera" inline
+button (CLAUDE.md step 8.4: the inline [Menu] button build order step 8.2
+introduced is gone, replaced by a reply keyboard attached once at the
+start of a session). Pure -- no database, no Telegram.
 """
 
 from __future__ import annotations
 
 from bot.keyboards.navigation import (
     FindPartnerCallback,
-    MenuCallback,
     MojeDebleCallback,
     find_partner_keyboard,
-    menu_keyboard,
-    terminal_keyboard,
+    persistent_menu_keyboard,
 )
 
 
@@ -24,20 +23,24 @@ def test_find_partner_keyboard_has_one_button():
     assert buttons[0].callback_data == FindPartnerCallback().pack()
 
 
-def test_terminal_keyboard_has_one_menu_button():
-    # CLAUDE.md build order step 8.2: "terminal messages get ONE button:
-    # [Menu]."
-    markup = terminal_keyboard("pl")
+def test_persistent_menu_keyboard_layout_and_labels():
+    # CLAUDE.md step 8.4: [Znajdź partnera] alone on its own row, [Moje
+    # deble] and [Zaproś na CourtDuo] sharing the next.
+    markup = persistent_menu_keyboard("pl")
 
-    buttons = [button for row in markup.inline_keyboard for button in row]
-    assert [button.text for button in buttons] == ["🔵 Menu"]
-    assert buttons[0].callback_data == MenuCallback().pack()
+    rows = [[button.text for button in row] for row in markup.keyboard]
+    assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"]]
 
 
-def test_menu_keyboard_offers_both_options():
-    markup = menu_keyboard("pl")
+def test_persistent_menu_keyboard_is_resizable_and_persistent():
+    markup = persistent_menu_keyboard("pl")
 
-    buttons = [button for row in markup.inline_keyboard for button in row]
-    assert [button.text for button in buttons] == ["Znajdź partnera", "Moje deble"]
-    assert buttons[0].callback_data == FindPartnerCallback().pack()
-    assert buttons[1].callback_data == MojeDebleCallback().pack()
+    assert markup.resize_keyboard is True
+    assert markup.is_persistent is True
+
+
+def test_find_partner_keyboard_and_moje_deble_callback_prefixes_unchanged():
+    # Still used elsewhere (bot.keyboards.tournament_search.category_keyboard,
+    # bot.handlers.moje_deble's own inline callback route).
+    assert FindPartnerCallback.__prefix__ == "fpart"
+    assert MojeDebleCallback.__prefix__ == "mdeble"
