@@ -29,8 +29,10 @@ from bot.handlers import (
     pending_external_invites_router,
     start_router,
     tournament_search_router,
+    viewers_router,
 )
 from bot.middlewares.db import DbSessionMiddleware
+from bot.middlewares.viewer_guard import ViewerActionGuardMiddleware
 
 load_dotenv()
 
@@ -49,6 +51,12 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     db_middleware = DbSessionMiddleware(session_factory)
     dispatcher.message.middleware(db_middleware)
     dispatcher.callback_query.middleware(db_middleware)
+    # CLAUDE.md step 10: fail-closed guard against a viewer (an active
+    # account_viewers grant, no Account of their own) reaching any action
+    # callback -- registered after db_middleware, which it depends on for
+    # `session`, and before every feature router so it sees every callback
+    # query regardless of which router would otherwise have handled it.
+    dispatcher.callback_query.middleware(ViewerActionGuardMiddleware())
 
     # navigation/moje_deble/invite_friend registered first: CLAUDE.md step
     # 8.4's persistent reply keyboard adds exact-text message handlers
@@ -64,6 +72,7 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     dispatcher.include_router(partner_selection_router)
     dispatcher.include_router(invitations_router)
     dispatcher.include_router(pending_external_invites_router)
+    dispatcher.include_router(viewers_router)
     return dispatcher
 
 

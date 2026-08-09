@@ -6,6 +6,7 @@ from .partner_selection import router as partner_selection_router
 from .pending_external_invites import router as pending_external_invites_router
 from .start import router as start_router
 from .tournament_search import router as tournament_search_router
+from .viewers import router as viewers_router
 
 __all__ = [
     "start_router",
@@ -16,4 +17,5 @@ __all__ = [
     "moje_deble_router",
     "invite_friend_router",
     "pending_external_invites_router",
+    "viewers_router",
 ]

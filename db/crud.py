@@ -38,6 +38,7 @@ from scrapers.tournaments.models import Tournament as ScrapedTournament
 
 from .models import (
     Account,
+    AccountViewer,
     AgeCategory,
     Event,
     Gender,
@@ -48,6 +49,7 @@ from .models import (
     Ranking,
     RankingList,
     Tournament,
+    ViewerInviteToken,
 )
 
 logger = logging.getLogger(__name__)
@@ -263,6 +265,10 @@ async def get_latest_ranking_period(session: AsyncSession, ranking_list: Ranking
 async def get_account_by_telegram_id(session: AsyncSession, telegram_id: int) -> Account | None:
     result = await session.execute(select(Account).where(Account.telegram_id == telegram_id))
     return result.scalar_one_or_none()
+
+
+async def get_account_by_id(session: AsyncSession, account_id: int) -> Account | None:
+    return await session.get(Account, account_id)
 
 
 async def get_account_by_pzt_id(session: AsyncSession, pzt_id: str) -> Account | None:
@@ -800,3 +806,113 @@ async def delete_pending_external_invite(session: AsyncSession, pending_id: int)
     pending = await session.get(PendingExternalInvite, pending_id)
     if pending is not None:
         await session.delete(pending)
+
+
+# --- Read-only viewers (CLAUDE.md "Identity", step 10) -----------------------
+
+# CLAUDE.md, DATA: "Maximum 3 active viewers per account." Checked both
+# when a fresh invite token is created (bot.viewers.create_invite_token)
+# and again when one is consumed (bot.viewers.bind_viewer), since two
+# outstanding tokens for the same account could otherwise both be
+# consumed and push the count past 3.
+MAX_ACTIVE_VIEWERS = 3
+
+
+async def create_viewer_invite_token(
+    session: AsyncSession, account_id: int, token: str, expires_at: datetime
+) -> ViewerInviteToken:
+    row = ViewerInviteToken(account_id=account_id, token=token, expires_at=expires_at)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_viewer_invite_token(session: AsyncSession, token: str) -> ViewerInviteToken | None:
+    result = await session.execute(select(ViewerInviteToken).where(ViewerInviteToken.token == token))
+    return result.scalar_one_or_none()
+
+
+async def mark_viewer_invite_token_consumed(session: AsyncSession, token_row: ViewerInviteToken, now: datetime) -> None:
+    """Burns a token whether or not binding actually adds a new viewer row
+    (CLAUDE.md step 10: "single-use... The token is consumed") -- a token
+    reused because the viewer already has active access, or reused past
+    the 3-viewer cap, must not remain usable for a second attempt.
+    """
+    token_row.consumed_at = now
+    await session.flush()
+
+
+async def count_active_viewers(session: AsyncSession, account_id: int) -> int:
+    result = await session.execute(
+        select(func.count(AccountViewer.id)).where(
+            AccountViewer.account_id == account_id, AccountViewer.revoked_at.is_(None)
+        )
+    )
+    return result.scalar_one()
+
+
+async def get_active_viewer(session: AsyncSession, account_id: int, viewer_telegram_id: int) -> AccountViewer | None:
+    result = await session.execute(
+        select(AccountViewer).where(
+            AccountViewer.account_id == account_id,
+            AccountViewer.viewer_telegram_id == viewer_telegram_id,
+            AccountViewer.revoked_at.is_(None),
+        )
+    )
+    return result.scalar_one_or_none()
+
+
+async def add_viewer(session: AsyncSession, account_id: int, viewer_telegram_id: int) -> AccountViewer:
+    row = AccountViewer(account_id=account_id, viewer_telegram_id=viewer_telegram_id)
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_active_viewers_for_account(session: AsyncSession, account_id: int) -> list[AccountViewer]:
+    """Every currently-active viewer of `account_id`, for the Podgląd list
+    screen and for bot.viewers.forward_to_viewers -- ordered by grant time
+    so the list is stable across renders."""
+    result = await session.execute(
+        select(AccountViewer)
+        .where(AccountViewer.account_id == account_id, AccountViewer.revoked_at.is_(None))
+        .order_by(AccountViewer.granted_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def get_active_viewer_grants_for_telegram_id(session: AsyncSession, viewer_telegram_id: int) -> list[AccountViewer]:
+    """Every account `viewer_telegram_id` currently has read-only access
+    to -- a Telegram account can be granted access by more than one player
+    independently (CLAUDE.md step 10: the unique constraint is scoped per
+    account, not per viewer). Eagerly loads the watched account, since the
+    read-only Moje deble chooser renders every row without a query each.
+    """
+    result = await session.execute(
+        select(AccountViewer)
+        .options(selectinload(AccountViewer.account))
+        .where(AccountViewer.viewer_telegram_id == viewer_telegram_id, AccountViewer.revoked_at.is_(None))
+        .order_by(AccountViewer.granted_at.asc())
+    )
+    return list(result.scalars().all())
+
+
+async def revoke_viewer(session: AsyncSession, account_id: int, viewer_id: int, now: datetime) -> AccountViewer | None:
+    """Revokes one active viewer grant, verifying it belongs to
+    `account_id` first -- a player may only revoke their own grants, never
+    somebody else's by guessing an id. Returns None (no-op) if the row
+    doesn't exist, isn't this account's, or is already revoked.
+    """
+    result = await session.execute(
+        select(AccountViewer).where(
+            AccountViewer.id == viewer_id,
+            AccountViewer.account_id == account_id,
+            AccountViewer.revoked_at.is_(None),
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        return None
+    row.revoked_at = now
+    await session.flush()
+    return row

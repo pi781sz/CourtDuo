@@ -153,5 +153,25 @@
       "W": "{name} dołączyła do CourtDuo. Możesz teraz wysłać jej prawdziwe zaproszenie."
     },
     "send_button": "Wyślij zaproszenie"
+  },
+  "viewer": {
+    "podglad_heading": "Podgląd",
+    "podglad_intro": "Możesz udostępnić maksymalnie 3 osobom podgląd swoich zaproszeń. Osoba z dostępem widzi Twoje powiadomienia i Twoje deble, ale nie może niczego wysyłać ani odpowiadać za Ciebie.",
+    "list_empty": "Nikt nie ma jeszcze dostępu do podglądu.",
+    "list_item": "{index}. dostęp od {date}",
+    "create_button": "Utwórz zaproszenie do podglądu",
+    "revoke_button": "Odwołaj dostęp #{index}",
+    "limit_reached": "Masz już maksymalną liczbę 3 osób z dostępem podglądu. Odwołaj jedną z nich, aby dodać nową.",
+    "invite_created": "Wyślij ten link osobie, której chcesz udostępnić podgląd. Link jest jednorazowy i ważny 24 godziny.\n{link}",
+    "invite_share_text": "Zapraszam Cię do podglądu moich zaproszeń w CourtDuo. {link}",
+    "invite_share_button": "Telegram",
+    "revoked": "Odwołano dostęp.",
+    "player_notified_grant": "{telegram_name} ma teraz dostęp do podglądu Twoich zaproszeń.",
+    "bound": {
+      "M": "Będziesz otrzymywać powiadomienia dotyczące {name} i możesz zobaczyć jego deble przez /moje_deble.",
+      "W": "Będziesz otrzymywać powiadomienia dotyczące {name} i możesz zobaczyć jej deble przez /moje_deble."
+    },
+    "choose_account_prompt": "Wybierz, czyje deble chcesz zobaczyć:",
+    "readonly_heading": "Podgląd: {name}"
   }
 }
