@@ -81,6 +81,7 @@ from bot.viewers import forward_to_viewers
 from core.text import display_name
 from db import crud
 from db.models import Account, Invitation, InvitationState
+from entitlements import can_use_viewers
 
 logger = logging.getLogger(__name__)
 
@@ -207,7 +208,7 @@ async def _notify_cancelled(
             bot,
             account.telegram_id,
             cancelled_message,
-            reply_markup=persistent_menu_keyboard(recipient_lang),
+            reply_markup=persistent_menu_keyboard(recipient_lang, can_use_viewers(account)),
         )
         await forward_to_viewers(bot, session, account.id, cancelled_message)
 
@@ -355,11 +356,12 @@ async def handle_accept(
                 _, partner_name = await _participant(session, partner_pzt_id)
                 await callback.message.answer(
                     t("partner_selection.inviter_already_matched", lang, name=display_name(partner_name)),
-                    reply_markup=persistent_menu_keyboard(lang),
+                    reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account)),
                 )
                 return
         await callback.message.answer(
-            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=persistent_menu_keyboard(lang)
+            t(_RESPOND_FAILURE_KEYS[result.failure], lang),
+            reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account)),
         )
         return
 
@@ -371,7 +373,9 @@ async def handle_accept(
     await session.commit()
 
     accepter_message = matched_text(inviter_name, label, lang)
-    await callback.message.answer(accepter_message, reply_markup=persistent_menu_keyboard(lang))
+    await callback.message.answer(
+        accepter_message, reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account))
+    )
     await forward_to_viewers(bot, session, account.id, accepter_message)
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
@@ -380,7 +384,7 @@ async def handle_accept(
             bot,
             inviter_account.telegram_id,
             inviter_message,
-            reply_markup=persistent_menu_keyboard(inviter_lang),
+            reply_markup=persistent_menu_keyboard(inviter_lang, can_use_viewers(inviter_account)),
         )
         await forward_to_viewers(bot, session, inviter_account.id, inviter_message)
     await _notify_cancelled(bot, session, result, matched_pair, lang)
@@ -418,7 +422,8 @@ async def _handle_simple_answer(
     if result.failure is not None:
         await session.commit()
         await callback.message.answer(
-            t(_RESPOND_FAILURE_KEYS[result.failure], lang), reply_markup=persistent_menu_keyboard(lang)
+            t(_RESPOND_FAILURE_KEYS[result.failure], lang),
+            reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account)),
         )
         return
 
@@ -429,7 +434,9 @@ async def _handle_simple_answer(
     await session.commit()
 
     responder_message = invitee_text(inviter_name, account.gender, label, lang)
-    await callback.message.answer(responder_message, reply_markup=persistent_menu_keyboard(lang))
+    await callback.message.answer(
+        responder_message, reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account))
+    )
     await forward_to_viewers(bot, session, account.id, responder_message)
     if inviter_account is not None:
         inviter_lang = inviter_account.lang or lang
@@ -438,7 +445,7 @@ async def _handle_simple_answer(
             bot,
             inviter_account.telegram_id,
             inviter_message,
-            reply_markup=persistent_menu_keyboard(inviter_lang),
+            reply_markup=persistent_menu_keyboard(inviter_lang, can_use_viewers(inviter_account)),
         )
         await forward_to_viewers(bot, session, inviter_account.id, inviter_message)
 
@@ -515,11 +522,12 @@ async def handle_cancel(
                 gendered(
                     _CANCEL_GENDERED_FAILURE_KEYS[result.failure], invitee_gender, lang, name=display_name(invitee_name)
                 ),
-                reply_markup=persistent_menu_keyboard(lang),
+                reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account)),
             )
             return
         await callback.message.answer(
-            t(_CANCEL_FAILURE_KEYS[result.failure], lang), reply_markup=persistent_menu_keyboard(lang)
+            t(_CANCEL_FAILURE_KEYS[result.failure], lang),
+            reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account)),
         )
         return
 
@@ -531,7 +539,9 @@ async def handle_cancel(
     await session.commit()
 
     canceller_message = cancelled_inviter_text(invitee_name, label, lang)
-    await callback.message.answer(canceller_message, reply_markup=persistent_menu_keyboard(lang))
+    await callback.message.answer(
+        canceller_message, reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account))
+    )
     await forward_to_viewers(bot, session, account.id, canceller_message)
 
     if invitee_account is not None:
@@ -541,7 +551,7 @@ async def handle_cancel(
             bot,
             invitee_account.telegram_id,
             invitee_message,
-            reply_markup=persistent_menu_keyboard(invitee_lang),
+            reply_markup=persistent_menu_keyboard(invitee_lang, can_use_viewers(invitee_account)),
         )
         await forward_to_viewers(bot, session, invitee_account.id, invitee_message)
         if invitee_message_id is not None:

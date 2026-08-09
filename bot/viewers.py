@@ -71,7 +71,13 @@ class ViewerBindResult:
     watched_account: Account | None = None
 
 
-async def bind_viewer(session: AsyncSession, viewer_telegram_id: int, raw_token: str, now: datetime) -> ViewerBindResult:
+async def bind_viewer(
+    session: AsyncSession,
+    viewer_telegram_id: int,
+    raw_token: str,
+    now: datetime,
+    viewer_display_name: str | None = None,
+) -> ViewerBindResult:
     """Consumes `raw_token` (CLAUDE.md step 10, GRANTING ACCESS) and binds
     `viewer_telegram_id` as a read-only viewer of the token's account.
 
@@ -83,6 +89,10 @@ async def bind_viewer(session: AsyncSession, viewer_telegram_id: int, raw_token:
     grant. Re-checks the 3-viewer cap here too, not just at token
     creation: two outstanding tokens for the same account could otherwise
     both be consumed and push the count past 3.
+
+    `viewer_display_name` (CLAUDE.md step 10.2) is the viewer's own
+    Telegram display name at the moment they accept the link -- captured
+    once, here, so the Podgląd list can later show who a grant belongs to.
     """
     token_row = await crud.get_viewer_invite_token(session, raw_token)
     if token_row is None or token_row.consumed_at is not None or token_row.expires_at <= now:
@@ -96,7 +106,7 @@ async def bind_viewer(session: AsyncSession, viewer_telegram_id: int, raw_token:
     if existing is None:
         if await crud.count_active_viewers(session, token_row.account_id) >= crud.MAX_ACTIVE_VIEWERS:
             return ViewerBindResult(ViewerBindOutcome.INVALID)
-        await crud.add_viewer(session, token_row.account_id, viewer_telegram_id)
+        await crud.add_viewer(session, token_row.account_id, viewer_telegram_id, viewer_display_name)
 
     watched_account = await crud.get_account_by_id(session, token_row.account_id)
     if watched_account is None:

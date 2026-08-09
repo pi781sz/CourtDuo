@@ -29,6 +29,7 @@ from bot.states import Registration
 from bot.viewers import ViewerBindOutcome, bind_viewer
 from core.text import display_name, first_name
 from db import crud
+from entitlements import can_use_viewers
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,9 @@ async def handle_start(
     # this is deliberately not a branch that returns early on failure.
     payload = (command.args or "").strip()
     if payload:
-        bind_result = await bind_viewer(session, message.from_user.id, payload, datetime.now(timezone.utc))
+        bind_result = await bind_viewer(
+            session, message.from_user.id, payload, datetime.now(timezone.utc), message.from_user.full_name
+        )
         if bind_result.outcome is ViewerBindOutcome.BOUND:
             watched = bind_result.watched_account
             # The viewer may or may not have a CourtDuo account of their
@@ -91,7 +94,9 @@ async def handle_start(
         # persistent reply keyboard is attached here, on /start, so it is
         # already present by the time the category screen shows up.
         lang = lang_for(account)
-        await message.answer(t("start.greeting_returning", lang), reply_markup=persistent_menu_keyboard(lang))
+        await message.answer(
+            t("start.greeting_returning", lang), reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account))
+        )
         await start_tournament_search(message, state, lang, session, account)
         return
 
@@ -144,7 +149,7 @@ async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSessi
     # depending on the earlier attachment alone.
     await message.answer(
         t("registration.welcome", lang, first_name=first_name(account.full_name)),
-        reply_markup=persistent_menu_keyboard(lang),
+        reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account)),
     )
 
     # CLAUDE.md scenario 2, build order step 9 PART 2: tell every inviter

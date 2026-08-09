@@ -22,6 +22,7 @@ from bot.handlers.moje_deble import handle_moje_deble_button_press, handle_moje_
 from bot.handlers.start import handle_start
 from bot.handlers.viewers import (
     handle_podglad,
+    handle_podglad_button,
     handle_viewer_choose_account,
     handle_viewer_create_invite,
     handle_viewer_revoke,
@@ -103,6 +104,40 @@ async def test_podglad_shows_the_menu_for_an_allowlisted_account(db_session: Asy
     assert "Podgląd" in text
 
 
+async def test_podglad_button_opens_the_same_menu_as_the_command(db_session: AsyncSession, monkeypatch):
+    # CLAUDE.md step 10.2, PROBLEM 4: tapping the persistent keyboard's
+    # "Podgląd konta" label must reach the same _render_menu screen /podglad
+    # does.
+    monkeypatch.setenv("VIEWER_ALLOWLIST_PZT_IDS", "VHD0021")
+    await _add_account(db_session, "VHD0021", 700021)
+    command_message = _make_message(700021)
+    button_message = _make_message(700021)
+
+    await handle_podglad(command_message, db_session)
+    await handle_podglad_button(button_message, db_session)
+
+    assert _texts(command_message.answer) == _texts(button_message.answer)
+
+
+async def test_podglad_button_is_invisible_for_a_non_allowlisted_account(db_session: AsyncSession, monkeypatch):
+    monkeypatch.setenv("VIEWER_ALLOWLIST_PZT_IDS", "SOMEONEELSE")
+    await _add_account(db_session, "VHD0022", 700022)
+    message = _make_message(700022)
+
+    await handle_podglad_button(message, db_session)
+
+    message.answer.assert_not_awaited()
+
+
+async def test_podglad_button_is_invisible_for_an_unregistered_telegram_id(db_session: AsyncSession, monkeypatch):
+    monkeypatch.setenv("VIEWER_ALLOWLIST_PZT_IDS", "VHD0023")
+    message = _make_message(700023)
+
+    await handle_podglad_button(message, db_session)
+
+    message.answer.assert_not_awaited()
+
+
 async def test_create_invite_is_refused_for_a_non_allowlisted_account_even_by_direct_callback(
     db_session: AsyncSession, monkeypatch
 ):
@@ -148,7 +183,8 @@ async def test_create_invite_shares_the_link_via_whatsapp_and_telegram_not_shown
     # the buttons do (a share message may be forwarded to anyone).
     assert "https://t.me/" not in text
     assert "Adam" not in text
-    assert "Wyślij link z dostępem przez" in text
+    # CLAUDE.md step 10.2, PROBLEM 2: no trailing colon.
+    assert text == "Wyślij link z dostępem\n\nLink jest jednorazowy i ważny 24 godziny."
 
     markup = kwargs["reply_markup"]
     assert isinstance(markup, InlineKeyboardMarkup)
@@ -178,6 +214,30 @@ async def test_create_invite_shares_the_link_via_whatsapp_and_telegram_not_shown
     assert isinstance(bind_markup, ReplyKeyboardMarkup)
     rows = [[button.text for button in row] for row in bind_markup.keyboard]
     assert rows == [["Moje deble"]]
+
+    # CLAUDE.md step 10.2, PROBLEM 3: the viewer's Telegram display name,
+    # captured at bind time, now shows in the owner's Podgląd list.
+    owner_message = _make_message(700005)
+    await handle_podglad(owner_message, db_session)
+    owner_text = _texts(owner_message.answer)[0]
+    assert "Rodzic Testowy — dostęp od" in owner_text
+
+
+async def test_podglad_list_falls_back_to_the_numbered_form_when_no_name_was_captured(
+    db_session: AsyncSession, monkeypatch
+):
+    # A grant made before viewer_display_name existed (or via crud.add_viewer
+    # directly, with no name) must never fall back to a raw Telegram id.
+    monkeypatch.setenv("VIEWER_ALLOWLIST_PZT_IDS", "VHD0020")
+    account = await _add_account(db_session, "VHD0020", 700020)
+    await crud.add_viewer(db_session, account.id, 741001)
+
+    message = _make_message(700020)
+    await handle_podglad(message, db_session)
+
+    text = _texts(message.answer)[0]
+    assert "1. dostęp od" in text
+    assert "741001" not in text
 
 
 async def test_create_invite_is_refused_at_the_three_viewer_cap(db_session: AsyncSession, monkeypatch):

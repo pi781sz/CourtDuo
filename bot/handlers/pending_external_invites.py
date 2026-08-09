@@ -25,6 +25,7 @@ from bot.keyboards.pending_external_invites import SendPendingExternalInviteCall
 from bot.lang import lang_for
 from bot.partner_selection import handle_partner_candidate
 from db import crud
+from entitlements import can_use_viewers
 
 router = Router(name="pending_external_invites")
 
@@ -54,7 +55,8 @@ async def handle_send_pending_external_invite(
         # A re-scrape or a data problem between the notification and this
         # tap -- CLAUDE.md, "Never dead-end": say so rather than crash.
         await callback.message.answer(
-            t("tournament_search.tournament_gone", lang), reply_markup=persistent_menu_keyboard(lang)
+            t("tournament_search.tournament_gone", lang),
+            reply_markup=persistent_menu_keyboard(lang, can_use_viewers(account)),
         )
         return
 

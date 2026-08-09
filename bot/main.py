@@ -58,21 +58,24 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     # query regardless of which router would otherwise have handled it.
     dispatcher.callback_query.middleware(ViewerActionGuardMiddleware())
 
-    # navigation/moje_deble/invite_friend registered first: CLAUDE.md step
-    # 8.4's persistent reply keyboard adds exact-text message handlers
-    # ("Znajdź partnera", "Moje deble", "Zaproś na CourtDuo") that must win
+    # navigation/moje_deble/invite_friend/viewers registered first:
+    # CLAUDE.md step 8.4's persistent reply keyboard adds exact-text
+    # message handlers ("Znajdź partnera", "Moje deble", "Zaproś na
+    # CourtDuo", and since step 10.2, "Podgląd konta") that must win
     # against a tap arriving while the player is mid another flow -- e.g.
     # typing a place or a partner name -- before those state-scoped
-    # handlers ever see the update.
+    # handlers ever see the update. viewers_router also carries the
+    # /podglad command and its callback handlers, unaffected by ordering,
+    # so moving it here for its label handler doesn't disturb them.
     dispatcher.include_router(navigation_router)
     dispatcher.include_router(moje_deble_router)
     dispatcher.include_router(invite_friend_router)
+    dispatcher.include_router(viewers_router)
     dispatcher.include_router(start_router)
     dispatcher.include_router(tournament_search_router)
     dispatcher.include_router(partner_selection_router)
     dispatcher.include_router(invitations_router)
     dispatcher.include_router(pending_external_invites_router)
-    dispatcher.include_router(viewers_router)
     return dispatcher
 
 

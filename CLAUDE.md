@@ -62,7 +62,7 @@ This is free and allowlisted for now — only accounts whose `pzt_id` appears in
 
 Attached everywhere a pure-viewer Telegram id can first see a keyboard: the viewer-bind confirmation (`viewer.bound`, step 10's own deep-link flow), a pure viewer's own `/start` (which now shows their read-only view directly rather than starting PZT-id registration on an account that will never own a player), and every render of `render_readonly_moje_deble` when the viewer looking has no `Account` of their own. Server-side guards (`bot.middlewares.viewer_guard`) are unaffected and still reject any action callback from a viewer regardless of which keyboard they were shown.
 
-**Podgląd screen copy (step 10.1):**
+**Podgląd screen copy (step 10.1, reworded by step 10.2):**
 
 ```
 Podgląd konta CourtDuo
@@ -74,16 +74,28 @@ Ciebie.
 Nikt nie ma jeszcze dostępu do podglądu.
 ```
 
-(the last line is the empty state; the existing viewer list renders in its place when grants exist). Creating an invite no longer shows the raw link as text — it shares it the same way "Zaproś na CourtDuo" does, reusing `bot.keyboards.invite_friend.share_keyboard` rather than a second WhatsApp/Telegram builder:
+(the last line is the empty state; the existing viewer list renders in its place when grants exist — see "which viewer" just below). Below the explanation and the list sits exactly **one** button, `viewer.share_button` — "Udostępnij podgląd mojego konta" — CLAUDE.md step 10.2, PROBLEM 1: an earlier build had left both this button *and* a second, separate "create" flow live at once, stacked. Tapping it generates the token and sends **one** message carrying the share buttons, reusing `bot.keyboards.invite_friend.share_keyboard` rather than a second WhatsApp/Telegram builder:
 
 ```
-Wyślij link z dostępem przez:
-[WhatsApp]  [Telegram]
+Wyślij link z dostępem
 
 Link jest jednorazowy i ważny 24 godziny.
+[WhatsApp]  [Telegram]
 ```
 
-The player's own name never goes into the share text (rule 2's spirit: a share message may be forwarded to anyone, and this one grants access to a child's account) — only the link does. The token itself is unchanged: still generated on demand, still single-use, still 24 hours. On acceptance the player is told: *"{telegram_name} ma teraz dostęp do podglądu Twojego konta CourtDuo."*
+(step 10.2, PROBLEM 2: no trailing colon on the first line). The share text itself: *"Zapraszam Cię do podglądu mojego konta CourtDuo. Link jednorazowy i ważny 24 godziny. {link}"* — the player's own name never goes into it (rule 2's spirit: a share message may be forwarded to anyone, and this one grants access to a child's account) — only the link does. The token itself is unchanged: still generated on demand, still single-use, still 24 hours. On acceptance the player is told: *"{telegram_name} ma teraz dostęp do podglądu Twojego konta CourtDuo."*
+
+**Which viewer (step 10.2, PROBLEM 3).** The list must say who each grant belongs to, not just a numbered slot and a date — a player has to be able to tell one viewer from another before deciding whom to remove. `account_viewers.viewer_display_name` captures the viewer's own Telegram display name once, at bind time (`bot.viewers.bind_viewer`), and the list shows it: `1. Piotr Polska — dostęp od 09.08.2026`. A grant made before this column existed (or one bound with no name for any other reason) falls back to the plain numbered form, `1. dostęp od 09.08.2026`, rather than showing a raw Telegram id. The revoke button reads `viewer.revoke_button` — "Skasuj dostęp #{index}" (not "Odwołaj").
+
+**Discoverability (step 10.2, PROBLEM 4).** `/podglad` still works exactly as before, but a fourth row is now shown on the persistent reply keyboard *only* for accounts `entitlements.can_use_viewers` allows:
+
+```
+[Znajdź partnera]
+[Moje deble]  [Zaproś na CourtDuo]
+[Podgląd konta]
+```
+
+`bot.keyboards.navigation.persistent_menu_keyboard` takes a `show_podglad` flag for this — every call site that sends the keyboard passes `can_use_viewers(account)` wherever an `Account` is in scope, so the row appears and disappears consistently across every screen rather than only some. Tapping the label opens the exact same `_render_menu` screen the command does. Everyone else's keyboard is unchanged: three buttons, exactly as before. A viewer-only account (no `Account` row of its own) still gets `viewer_menu_keyboard` and never sees this row either way — this only ever governs the fourth row of a registered player's own keyboard, and "Step 10's Podgląd menu is deliberately not a fourth label here" above is superseded by this gated version.
 
 **Name order: storage is PZT's, display is not.** PZT stores names "Nazwisko Imię" (surname first) — `accounts.full_name` and `players.full_name` keep that order permanently, and name matching (see "Tournament selection" → partner name entry) accepts either order. But every user-facing message must show "Imię Nazwisko" instead: "Szewczyk Jagoda" → "Jagoda Szewczyk". `core.text.display_name` does this reordering (first token is the surname, every remaining token is a given name) and every place a player's name is shown — invitations, accept/reject/not-attending notifications, "already has a partner" checks, disambiguation buttons — must go through it. `core.text.first_name`, used only for the player's own welcome greeting, returns just the first given name — the *second* token, since the first is the surname.
 
@@ -104,9 +116,9 @@ Attached on `/start` — for a brand new registration, on the very first greetin
 
 **Belt and braces (step 8.7):** the reply keyboard, even correctly attached with `is_persistent`, can still be collapsed by the player via Telegram's own keyboard icon, and Telegram remembers that per chat — no server-side flag prevents it. So the invitation-send confirmation ("Zaproszenie zostało wysłane. Czekaj na odpowiedź.") — the one screen a player has just acted on and is most likely to want to check next — also carries its own **inline** `[Moje deble]` button (`bot.keyboards.navigation.invitation_sent_keyboard`, reusing `MojeDebleCallback`). Inline buttons can't be collapsed. This is deliberately not added anywhere else — step 8.2 already established that mid-flow inline clutter is worse than the dead end it solves, and every other message either already carries the reply keyboard or an inline keyboard of its own.
 
-This replaces the inline `[Menu]` button and its two-option chooser that earlier steps used: no message anywhere needs a navigation button of its own any more, because the three actions are already one tap away, always. Inline keyboards for actual **choices** — category buttons, tournament lists, disambiguation, the invitation's three answer buttons — stay inline and unchanged; the reply keyboard only ever carries these three fixed actions.
+This replaces the inline `[Menu]` button and its two-option chooser that earlier steps used: no message anywhere needs a navigation button of its own any more, because these actions are already one tap away, always. Inline keyboards for actual **choices** — category buttons, tournament lists, disambiguation, the invitation's three answer buttons — stay inline and unchanged; the reply keyboard only ever carries these fixed actions (three for everyone, a gated fourth for some — see step 10.2 immediately below).
 
-**Step 10's Podgląd menu is deliberately not a fourth label here.** It's reachable only via `/podglad`, same as `/moje_deble` is reachable by command independent of its reply-keyboard label. The reply keyboard is shown to every player regardless of the allowlist, so adding a label for a feature most accounts can't use would need the keyboard to become allowlist-aware — a bigger change than an allowlisted test feature warrants, and unnecessary since a command already works as a keyboard-independent entry point. This is about a registered player's own persistent keyboard specifically — see "Identity", step 10.1, for the separate, narrower keyboard a Telegram account with no player account of its own gets instead.
+**Step 10's Podgląd menu was deliberately not a fourth label here — superseded by step 10.2.** The original reasoning: reachable only via `/podglad`, same as `/moje_deble` is reachable by command independent of its reply-keyboard label; the reply keyboard is shown to every player regardless of the allowlist, so adding a label for a feature most accounts can't use would need the keyboard to become allowlist-aware. Live testing found that reasoning left the feature undiscoverable — an allowlisted player has no way to learn `/podglad` exists at all. Step 10.2 makes the keyboard allowlist-aware after all, but only for this one row: `bot.keyboards.navigation.persistent_menu_keyboard(lang, show_podglad)` adds `[Podgląd konta]` as a fourth row exactly when `entitlements.can_use_viewers(account)` is true, gated at the one place the keyboard is built, not per call site. `/podglad` keeps working unchanged as a command; the label opens the identical screen. This is about a registered player's own persistent keyboard specifically — see "Identity", step 10.1, for the separate, narrower keyboard a Telegram account with no player account of its own gets instead, which this does not touch.
 
 **Zaproś na CourtDuo** — a generic invite, unattached to any tournament or named player. Sends WhatsApp and Telegram share buttons (both plain `https://` URLs — Telegram inline buttons accept nothing else) pre-filled with a short Polish invitation and a link built from the bot's own username (`get_me()`, fetched at runtime — never hardcoded, so the same code is correct for the test and production bots). There is no SMS option at all (step 8.5 dropped it — an `sms:` inline button is rejected outright by Telegram, and the copyable-text-in-the-message-body workaround it had was more clutter than it was worth). The bot never sees, stores or handles a phone number here either (rule 2) — the recipient is chosen in the player's own phone/app. This is **not** step 9's flow: no `pending_external_invites` row, no "they joined" callback, nothing tournament- or player-specific. The same two buttons and share text are reused (still with no named player in the text — see "Pre-invitation checks") when a player names someone who exists in PZT's rankings but has no CourtDuo account yet, so that dead end isn't a total one either.
 

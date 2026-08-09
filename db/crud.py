@@ -862,8 +862,12 @@ async def get_active_viewer(session: AsyncSession, account_id: int, viewer_teleg
     return result.scalar_one_or_none()
 
 
-async def add_viewer(session: AsyncSession, account_id: int, viewer_telegram_id: int) -> AccountViewer:
-    row = AccountViewer(account_id=account_id, viewer_telegram_id=viewer_telegram_id)
+async def add_viewer(
+    session: AsyncSession, account_id: int, viewer_telegram_id: int, viewer_display_name: str | None = None
+) -> AccountViewer:
+    row = AccountViewer(
+        account_id=account_id, viewer_telegram_id=viewer_telegram_id, viewer_display_name=viewer_display_name
+    )
     session.add(row)
     await session.flush()
     return row

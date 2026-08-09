@@ -68,16 +68,26 @@ def find_partner_keyboard(lang: str) -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-def persistent_menu_keyboard(lang: str) -> ReplyKeyboardMarkup:
+def persistent_menu_keyboard(lang: str, show_podglad: bool = False) -> ReplyKeyboardMarkup:
     """CLAUDE.md step 8.4: [Znajdź partnera] alone on its own row, [Moje
     deble] and [Zaproś na CourtDuo] sharing the next -- resize_keyboard so
     it doesn't take up the whole screen, is_persistent so it doesn't hide
-    itself after one tap."""
+    itself after one tap.
+
+    CLAUDE.md step 10.2: `show_podglad` adds a fourth row, [Podgląd konta],
+    for accounts entitlements.can_use_viewers allows -- the caller decides
+    that, this function just lays the button out. Everyone else's keyboard
+    is unchanged: three buttons, exactly as before.
+    """
     builder = ReplyKeyboardBuilder()
     builder.button(text=t("common.find_partner_button", lang))
     builder.button(text=t("common.moje_deble_button", lang))
     builder.button(text=t("common.invite_button", lang))
-    builder.adjust(1, 2)
+    if show_podglad:
+        builder.button(text=t("common.podglad_button", lang))
+        builder.adjust(1, 2, 1)
+    else:
+        builder.adjust(1, 2)
     return builder.as_markup(resize_keyboard=True, is_persistent=True)
 
 

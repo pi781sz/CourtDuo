@@ -41,6 +41,25 @@ def test_persistent_menu_keyboard_is_resizable_and_persistent():
     assert markup.is_persistent is True
 
 
+def test_persistent_menu_keyboard_gains_a_fourth_row_when_podglad_is_shown():
+    # CLAUDE.md step 10.2, PROBLEM 4: a fourth row, [Podgląd konta], only
+    # for accounts entitlements.can_use_viewers allows -- the caller
+    # decides, this keyboard just lays it out when told to.
+    markup = persistent_menu_keyboard("pl", show_podglad=True)
+
+    rows = [[button.text for button in row] for row in markup.keyboard]
+    assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"], ["Podgląd konta"]]
+    assert markup.resize_keyboard is True
+    assert markup.is_persistent is True
+
+
+def test_persistent_menu_keyboard_defaults_to_no_podglad_row():
+    markup = persistent_menu_keyboard("pl", show_podglad=False)
+
+    rows = [[button.text for button in row] for row in markup.keyboard]
+    assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"]]
+
+
 def test_invitation_sent_keyboard_has_one_moje_deble_button():
     # CLAUDE.md step 8.7: belt-and-braces for "Zaproszenie zostało
     # wysłane" -- an inline button, so it can't be collapsed the way the
