@@ -78,6 +78,23 @@ def sent_text(partner_name: str, tournament: str, lang: str) -> str:
     )
 
 
+def already_invited_text(inviter_full_name: str, tournament: str, lang: str) -> str:
+    """PROBLEM 3 (CLAUDE.md, "Pre-invitation checks"): shown instead of a
+    confirmation screen when the named player already has a pending
+    invitation to this player for this tournament -- redirects to the
+    answer already owed rather than creating a second invitation chasing
+    the same pair. Paired with the same invitation_answer_keyboard() the
+    original notification carries.
+    """
+    return "\n".join(
+        (
+            t("partner_selection.already_invited_by", lang, name=display_name(inviter_full_name)),
+            tournament,
+            t("invitation.warning_cannot_change", lang),
+        )
+    )
+
+
 # --- Invitee side, the invitation itself ---------------------------------------
 
 

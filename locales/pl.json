@@ -73,7 +73,8 @@
     "already_answered": "Na to zaproszenie już odpowiedziano.",
     "expired": "To zaproszenie wygasło.",
     "invitee_not_on_courtduo": "{name} nie używa jeszcze CourtDuo. Wpisz imię i nazwisko innej osoby.",
-    "delivery_failed": "Nie udało się dostarczyć zaproszenia do {name}. Wpisz imię i nazwisko innej osoby."
+    "delivery_failed": "Nie udało się dostarczyć zaproszenia do {name}. Wpisz imię i nazwisko innej osoby.",
+    "already_invited_by_invitee": "Masz już zaproszenie od {name} na ten turniej. Sprawdź „Moje deble”, aby odpowiedzieć."
   },
   "partner_selection": {
     "ask_name": "Wpisz imię i nazwisko osoby, z którą chcesz grać.",
@@ -90,7 +91,8 @@
     "invitee_already_matched": "{name} ma już partnera na ten turniej.\nWpisz imię i nazwisko innej osoby.",
     "pending_invitation_exists": "Zaproszenie do {name} zostało już wysłane. Czekaj na odpowiedź.",
     "max_pending_reached": "Masz już 3 oczekujące zaproszenia na ten turniej. Poczekaj na odpowiedź, zanim zaprosisz kogoś nowego.",
-    "cannot_send_invitation": "Nie możesz teraz wysłać zaproszenia. Spróbuj ponownie później."
+    "cannot_send_invitation": "Nie możesz teraz wysłać zaproszenia. Spróbuj ponownie później.",
+    "already_invited_by": "Masz już zaproszenie od {name} na ten turniej."
   },
   "player": {
     "position_known": "{position}. w rankingu",
@@ -99,7 +101,9 @@
   "common": {
     "unknown_club": "brak klubu",
     "find_partner_button": "Znajdź partnera",
-    "moje_deble_button": "Moje deble"
+    "moje_deble_button": "Moje deble",
+    "menu_button": "Menu",
+    "menu_prompt": "Co chcesz zrobić?"
   },
   "moje_deble": {
     "empty": "Nie masz jeszcze żadnych zaproszeń.",

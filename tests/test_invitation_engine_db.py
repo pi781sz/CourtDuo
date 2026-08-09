@@ -207,6 +207,25 @@ async def test_send_refuses_a_gender_mismatch(db_session: AsyncSession):
     assert result.failure is SendFailure.GENDER_MISMATCH
 
 
+async def test_send_refuses_when_the_invitee_already_invited_the_inviter(db_session: AsyncSession):
+    # PROBLEM 3 (CLAUDE.md, "Pre-invitation checks"): Jagoda invited Anna a
+    # moment ago -- after bot.partner_selection's pre-check ran, this test
+    # simulates -- so Anna's send must be refused by the transaction itself,
+    # not only by the pre-check, and no second invitation must be created.
+    tournament = await _add_tournament(db_session)
+    await _add_user(db_session, "SND050", "Testowa Anna", 5050)
+    await _add_user(db_session, "SND051", "Testowa Jagoda", 5051)
+    anna = await _account(db_session, "SND050")
+    jagoda = await _account(db_session, "SND051")
+    await send_invitation(db_session, jagoda, tournament, await _player(db_session, "SND050"), _NOW)
+
+    result = await send_invitation(db_session, anna, tournament, await _player(db_session, "SND051"), _NOW)
+
+    assert result.failure is SendFailure.ALREADY_INVITED_BY_INVITEE
+    assert await crud.count_pending_outgoing_invitations(db_session, "SND050", _GUID) == 0
+    assert await crud.count_pending_outgoing_invitations(db_session, "SND051", _GUID) == 1
+
+
 # --- accepting ------------------------------------------------------------------
 
 

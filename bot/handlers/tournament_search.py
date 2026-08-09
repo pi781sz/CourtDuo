@@ -25,7 +25,6 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.i18n import t
-from bot.keyboards.navigation import terminal_keyboard
 from bot.keyboards.tournament_search import (
     CategorySelectCallback,
     ChangeCategoryCallback,
@@ -132,10 +131,11 @@ async def handle_category(
     await callback.message.edit_reply_markup(reply_markup=None)
     # Confirms the tapped category before asking for a place, since
     # several screens later the player would otherwise have no way of
-    # knowing which category they are in (CLAUDE.md step 5.3).
+    # knowing which category they are in (CLAUDE.md step 5.3). Mid-flow
+    # (CLAUDE.md step 8.2): the next thing expected is typing a place.
     category_line = category_selected_text(category, lang)
     place_line = t("tournament_search.ask_place", lang)
-    await callback.message.answer(f"{category_line}\n{place_line}", reply_markup=terminal_keyboard(lang))
+    await callback.message.answer(f"{category_line}\n{place_line}")
     await state.set_state(TournamentSearch.waiting_place)
     await callback.answer()
 
@@ -148,7 +148,9 @@ async def handle_place(message: Message, state: FSMContext, session: AsyncSessio
     place = (message.text or "").strip()
 
     if not meets_min_place_length(place):
-        await message.answer(t("tournament_search.place_too_short", lang), reply_markup=terminal_keyboard(lang))
+        # Mid-flow (CLAUDE.md step 8.2): the next thing expected is typing
+        # the place again.
+        await message.answer(t("tournament_search.place_too_short", lang))
         return
 
     data = await state.get_data()
@@ -194,10 +196,11 @@ async def handle_change_place(callback: CallbackQuery, state: FSMContext, sessio
     account = await crud.get_account_by_telegram_id(session, callback.from_user.id)
     lang = lang_for(account)
 
-    # Keeps the chosen category (CLAUDE.md step 5.1, "Navigation").
+    # Keeps the chosen category (CLAUDE.md step 5.1, "Navigation"). Mid-flow
+    # (CLAUDE.md step 8.2): the next thing expected is typing a place.
     await state.update_data(place=None)
     await callback.message.edit_reply_markup(reply_markup=None)
-    await callback.message.answer(t("tournament_search.ask_place", lang), reply_markup=terminal_keyboard(lang))
+    await callback.message.answer(t("tournament_search.ask_place", lang))
     await callback.answer()
 
 
@@ -229,9 +232,11 @@ async def handle_select(
     if tournament is None or tournament.date_from is None:
         # A re-scrape deleted it between listing and tap (CLAUDE.md step
         # 5.1, "the silent no-op"): say so, then re-show current results
-        # instead of leaving a dead button on screen.
+        # instead of leaving a dead button on screen. Mid-flow (CLAUDE.md
+        # step 8.2): always immediately followed by a re-shown, keyboarded
+        # results/category screen below.
         await callback.answer()
-        await callback.message.answer(t("tournament_search.tournament_gone", lang), reply_markup=terminal_keyboard(lang))
+        await callback.message.answer(t("tournament_search.tournament_gone", lang))
         data = await state.get_data()
         category = AgeCategory[data["category"]]
         place = data.get("place") or ""
@@ -255,6 +260,7 @@ async def handle_select(
     confirmation = selection_confirmation_text(
         tournament.venue_city, tournament.wojewodztwo, tournament.age_category, tournament.date_from, lang
     )
-    await callback.message.answer(confirmation, reply_markup=terminal_keyboard(lang))
+    # Mid-flow (CLAUDE.md step 8.2): the very next thing is the name prompt.
+    await callback.message.answer(confirmation)
     await callback.answer()
     await start_partner_selection(callback.message, state, lang, session, account, tournament)

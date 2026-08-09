@@ -339,6 +339,44 @@ async def test_check_6_max_pending_invitations_reached_is_refused(db_session: As
     assert failure is CheckFailure.MAX_PENDING_REACHED
 
 
+async def test_already_invited_by_candidate_redirects_to_answering_instead_of_a_second_invitation(
+    db_session: AsyncSession,
+):
+    # PROBLEM 3 (CLAUDE.md, "Pre-invitation checks"): Ola already invited
+    # Anna to this tournament. Anna naming Ola back must not create a
+    # second invitation chasing the same pair -- she is shown Ola's
+    # invitation instead, with its own answer buttons, so she can simply
+    # accept it.
+    tournament = _tournament()
+    db_session.add(tournament)
+    await db_session.flush()
+    event_id = await _add_event(db_session, tournament.guid, Gender.GIRLS)
+    await _add_player(db_session, "INV001", "Testowa Anna", gender=Gender.GIRLS)
+    await _add_account(db_session, 2001, "INV001", "Testowa Anna", "W")
+    await _add_player(db_session, "INV002", "Testowa Ola", gender=Gender.GIRLS)
+    await _add_account(db_session, 2002, "INV002", "Testowa Ola", "W")
+    _add_invitation(db_session, "INV002", "INV001", tournament.guid, event_id, InvitationState.PENDING)
+    await db_session.flush()
+
+    account = await crud.get_account_by_pzt_id(db_session, "INV001")
+    candidate = await crud.get_player_by_pzt_id(db_session, "INV002")
+    message = _make_message()
+    state = _make_state(2001)
+
+    await handle_partner_candidate(message, state, db_session, "pl", account, tournament, candidate)
+
+    texts = [call.args[0] for call in message.answer.call_args_list]
+    assert any("Ola Testowa" in text for text in texts)
+    markup = message.answer.call_args.kwargs["reply_markup"]
+    button_texts = [button.text for row in markup.inline_keyboard for button in row]
+    assert button_texts == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
+    # Still just the one invitation -- no second one was created, and no
+    # confirmation screen was shown (the state stays wherever it started).
+    assert await crud.count_pending_outgoing_invitations(db_session, "INV001", tournament.guid) == 0
+    assert await crud.count_pending_outgoing_invitations(db_session, "INV002", tournament.guid) == 1
+    assert await state.get_state() is None
+
+
 async def test_all_checks_pass_hands_off_to_the_confirmation_screen(db_session: AsyncSession):
     tournament = _tournament()
     db_session.add(tournament)

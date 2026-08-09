@@ -1,15 +1,16 @@
-"""The "Znajdź partnera" and "Moje deble" buttons (CLAUDE.md, step 7.1,
-"a way back", extended by step 8's terminal-message audit): every terminal
-message — one that ends a flow with nothing else to tap — carries both, so
-`/start` is never the only way forward and a player is never stuck without
-a link to their own status view. Handlers live in bot.handlers.navigation
-(Znajdź partnera) and bot.handlers.moje_deble (Moje deble); this module
-only builds the keyboards, since every module that composes a terminal
-message needs one of them alongside whatever other reply_markup it was
-already passing (usually none).
+"""The [Menu] navigation button and the menu it opens (CLAUDE.md, step 7.1,
+"a way back", reworked by step 8.2 into a single entry point): a terminal
+message — one that ends a flow with nothing else to tap — carries one
+[Menu] button rather than "Znajdź partnera" and "Moje deble" side by side.
+Tapping it shows a small menu message with both options. Handlers live in
+bot.handlers.navigation (Menu, Znajdź partnera) and bot.handlers.moje_deble
+(Moje deble); this module only builds the keyboards, since every module
+that composes a terminal message needs one alongside whatever other
+reply_markup it was already passing (usually none).
 
 find_partner_keyboard stays single-button for the one place a "Moje deble"
-button would point back at itself: the empty state of /moje_deble.
+button would point back at itself: the "Moje deble" summary and its empty
+state (CLAUDE.md, "Moje deble" status view).
 """
 
 from __future__ import annotations
@@ -29,6 +30,10 @@ class MojeDebleCallback(CallbackData, prefix="mdeble"):
     pass
 
 
+class MenuCallback(CallbackData, prefix="menu"):
+    pass
+
+
 def find_partner_keyboard(lang: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
@@ -37,13 +42,22 @@ def find_partner_keyboard(lang: str) -> InlineKeyboardMarkup:
 
 
 def terminal_keyboard(lang: str) -> InlineKeyboardMarkup:
-    """CLAUDE.md build order step 8: "Every one of them gets both buttons:
-    [Moje deble] [Znajdź partnera]." The pair every terminal message in
-    bot.handlers.invitations carries, plus every place elsewhere in this
-    audit that turned out to end a flow with nothing else to tap.
+    """CLAUDE.md build order step 8.2: a terminal message — the journey has
+    ended and the player has no next step in the current flow — carries
+    exactly one button, [Menu], rather than the two direct buttons step 8
+    used. Tapping it opens menu_keyboard()'s chooser.
     """
     builder = InlineKeyboardBuilder()
-    builder.button(text=t("common.moje_deble_button", lang), callback_data=MojeDebleCallback())
+    builder.button(text=t("common.menu_button", lang), callback_data=MenuCallback())
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def menu_keyboard(lang: str) -> InlineKeyboardMarkup:
+    """The chooser [Menu] opens: "Znajdź partnera" and "Moje deble", in
+    that order (CLAUDE.md step 8.2)."""
+    builder = InlineKeyboardBuilder()
     builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
+    builder.button(text=t("common.moje_deble_button", lang), callback_data=MojeDebleCallback())
     builder.adjust(1)
     return builder.as_markup()
