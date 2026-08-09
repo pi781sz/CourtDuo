@@ -82,5 +82,15 @@ async def handle_pzt_id(message: Message, state: FSMContext, session: AsyncSessi
         return
 
     account = result.account
-    await message.answer(t("registration.welcome", lang, first_name=first_name(account.full_name)))
+    # CLAUDE.md step 8.7: for a brand new registration, this greeting --
+    # not the very first "Cześć!" -- is the one that actually precedes the
+    # age-category screen. The first greeting fires before the player has
+    # typed anything and before their client may have finished applying
+    # it; re-sending it here, right before the category screen needs the
+    # slot for its own inline keyboard, closes that gap rather than
+    # depending on the earlier attachment alone.
+    await message.answer(
+        t("registration.welcome", lang, first_name=first_name(account.full_name)),
+        reply_markup=persistent_menu_keyboard(lang),
+    )
     await start_tournament_search(message, state, lang_for(account), session, account)

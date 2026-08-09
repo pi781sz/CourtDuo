@@ -206,9 +206,11 @@ async def test_confirming_sends_the_invitation_to_the_invitee(db_session: AsyncS
     markup = bot.send_message.call_args.kwargs["reply_markup"]
     assert _button_texts(markup) == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
     assert _answers(callback) == [f"Zaproszenie zostało wysłane. Czekaj na odpowiedź.\n🟠 Jagoda Testowa — {_LABEL}"]
-    # CLAUDE.md step 8.4: no inline navigation button any more -- the
-    # persistent reply keyboard is always visible below the input box.
-    assert _answer_markups(callback)[0] is None
+    # CLAUDE.md step 8.7: belt-and-braces inline [Moje deble] button -- the
+    # persistent reply keyboard can be collapsed by the player, so the one
+    # screen they've just acted on gets its own way back that can't be.
+    sent_markup = _answer_markups(callback)[0]
+    assert _button_texts(sent_markup) == ["Moje deble"]
     assert await crud.count_pending_outgoing_invitations(db_session, "HND001", _GUID) == 1
     # Free to name somebody else straight away, up to three pending.
     assert await state.get_state() == PartnerSelection.waiting_name.state
