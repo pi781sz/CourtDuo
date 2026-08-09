@@ -16,9 +16,10 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.fsm.storage.memory import MemoryStorage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.handlers.tournament_search import handle_change_category, handle_change_place
+from bot.handlers.tournament_search import handle_category, handle_change_category, handle_change_place
+from bot.keyboards.tournament_search import CategorySelectCallback
 from bot.states import TournamentSearch
-from db.models import Account, AgeCategory, Player
+from db.models import Account, AgeCategory, Gender, Player, Ranking, RankingList
 
 _TELEGRAM_ID = 999001
 
@@ -73,3 +74,36 @@ async def test_change_category_clears_category(db_session: AsyncSession):
     assert data.get("category") is None
     assert data.get("place") is None
     assert await state.get_state() == TournamentSearch.waiting_category.state
+
+
+async def test_category_tap_below_own_category_is_refused_and_re_shows_keyboard(db_session: AsyncSession):
+    # CLAUDE.md step 8.3, PROBLEM 1a: a stale or crafted callback naming a
+    # category below the player's own must be refused the same way an
+    # unavailable one already is -- never a dead end into the place prompt.
+    telegram_id = 999002
+    db_session.add(
+        Player(pzt_id="TST00002", full_name="Test Player Two", club=None, age_category=None, gender=Gender.BOYS)
+    )
+    await db_session.flush()
+    db_session.add(
+        Account(telegram_id=telegram_id, pzt_id="TST00002", full_name="Test Player Two", gender="M", lang="pl")
+    )
+    db_session.add(Ranking(player_pzt_id="TST00002", ranking_list=RankingList.M16, year=2026, month=8, position=1))
+    await db_session.flush()
+
+    key = StorageKey(bot_id=1, chat_id=telegram_id, user_id=telegram_id)
+    state = FSMContext(storage=MemoryStorage(), key=key)
+    await state.set_state(TournamentSearch.waiting_category)
+
+    callback = MagicMock()
+    callback.from_user.id = telegram_id
+    callback.message.edit_reply_markup = AsyncMock()
+    callback.answer = AsyncMock()
+
+    await handle_category(
+        callback, CategorySelectCallback(category=AgeCategory.SKRZATY.name), state, db_session
+    )
+
+    callback.message.edit_reply_markup.assert_awaited_once()
+    assert await state.get_state() == TournamentSearch.waiting_category.state
+    assert (await state.get_data()).get("category") is None

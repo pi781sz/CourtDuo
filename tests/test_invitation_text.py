@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 
+from bot.formatting import STATUS_EMOJI
 from bot.invitation_text import (
     accepted_inviter_text,
     confirmation_text,
@@ -33,6 +34,7 @@ from bot.invitation_text import (
     rejected_inviter_text,
     sent_text,
 )
+from db.models import InvitationState
 
 _LABEL = "WTK Uniejów - 22.08.2026"
 
@@ -77,13 +79,13 @@ def test_not_attending_inflects_for_the_invitee():
     assert not_attending_invitee_text("W", "pl") == "Odpowiedziałaś, że nie jedziesz na ten turniej."
 
 
-def test_not_attending_seen_by_inviter_is_neutral_and_not_a_refusal():
+def test_not_attending_seen_by_inviter_uses_the_same_colour_as_a_refusal():
     text = not_attending_inviter_text("Testowa Jagoda", "pl")
 
-    # 🟠, distinct from the 🔴 of a refusal (CLAUDE.md), and the same
-    # sentence whoever the player is -- "nie jedzie" does not inflect.
-    assert text == "🟠 Jagoda Testowa nie jedzie na ten turniej."
-    assert "🔴" not in text
+    # CLAUDE.md step 8.3, PROBLEM 2: same 🔴 as a refusal now -- the colour
+    # only needs to say "not happening", the wording still carries the
+    # distinction. Not gendered: "nie jedzie" is the same for everyone.
+    assert text == "🔴 Jagoda Testowa nie jedzie na ten turniej."
     assert text == not_attending_inviter_text("Testowa Jagoda", "pl")
 
 
@@ -124,8 +126,33 @@ def test_invitation_names_the_inviter_in_full_and_carries_the_warning():
 def test_sent_confirmation_shows_the_pending_marker():
     text = sent_text("Testowa Jagoda", _LABEL, "pl")
 
-    assert text == f"Zaproszenie zostało wysłane. Czekaj na odpowiedź.\n⚪ Jagoda Testowa — {_LABEL}"
+    # CLAUDE.md step 8.3, PROBLEM 2: 🟠 pending, not the old ⚪.
+    assert text == f"Zaproszenie zostało wysłane. Czekaj na odpowiedź.\n🟠 Jagoda Testowa — {_LABEL}"
 
 
 def test_matched_line_names_the_partner_and_the_tournament():
     assert matched_text("Testowa Jagoda", _LABEL, "pl") == f"🟢 Partner: Jagoda Testowa — {_LABEL}"
+
+
+# --- CLAUDE.md step 8.3, PROBLEM 2: every colour comes from STATUS_EMOJI ------
+
+
+def test_every_status_message_uses_the_status_emoji_lookup_not_a_literal():
+    assert sent_text("Testowa Jagoda", _LABEL, "pl").endswith(
+        f"{STATUS_EMOJI[InvitationState.PENDING]} Jagoda Testowa — {_LABEL}"
+    )
+    assert matched_text("Testowa Jagoda", _LABEL, "pl") == (
+        f"{STATUS_EMOJI[InvitationState.ACCEPTED]} Partner: Jagoda Testowa — {_LABEL}"
+    )
+    assert rejected_invitee_text("Testowa Anna", "W", _LABEL, "pl") == (
+        f"{STATUS_EMOJI[InvitationState.REJECTED]} Odrzuciłaś zaproszenie od Anna Testowa — {_LABEL}."
+    )
+    assert rejected_inviter_text("Testowa Jagoda", "W", _LABEL, "pl") == (
+        f"{STATUS_EMOJI[InvitationState.REJECTED]} Jagoda Testowa odrzuciła zaproszenie — {_LABEL}."
+    )
+    assert not_attending_inviter_text("Testowa Jagoda", "pl") == (
+        f"{STATUS_EMOJI[InvitationState.NOT_ATTENDING]} Jagoda Testowa nie jedzie na ten turniej."
+    )
+    # CLAUDE.md step 8.3, PROBLEM 2: rejected and not-attending now share
+    # the same colour -- "not happening" either way.
+    assert STATUS_EMOJI[InvitationState.REJECTED] == STATUS_EMOJI[InvitationState.NOT_ATTENDING]

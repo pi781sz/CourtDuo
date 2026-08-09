@@ -42,15 +42,30 @@ def ranga_prefix(ranga: int | None) -> str | None:
     return RANGA_PREFIX.get(ranga)
 
 
-# Display order for the four category buttons (CLAUDE.md step 5.1: "all
-# four are always offered", never filtered or reordered by the player's
-# own age).
+# Display order for the four category buttons.
 CATEGORY_ORDER: tuple[AgeCategory, ...] = (
     AgeCategory.SKRZATY,
     AgeCategory.MLODZICY,
     AgeCategory.KADECI,
     AgeCategory.JUNIORZY,
 )
+
+
+def categories_for_own_category(own_category: AgeCategory | None) -> tuple[AgeCategory, ...]:
+    """CLAUDE.md step 8.3, PROBLEM 1a: a player may play up but never
+    down, so the category screen only offers categories >= their own --
+    e.g. a U16 player sees U16/U18 only, never U12/U14. Categories below
+    are hidden entirely (not shown as "brak turniejów", which still means
+    eligible-but-empty).
+
+    `own_category` is None when a player has no ranking rows at all --
+    should not happen for a registered player (registration requires a
+    PZT id present in a ranking list), but this must never crash or guess:
+    every category is offered instead of blocking the player outright.
+    """
+    if own_category is None:
+        return CATEGORY_ORDER
+    return tuple(category for category in CATEGORY_ORDER if category.value >= own_category.value)
 
 
 @dataclass(frozen=True)

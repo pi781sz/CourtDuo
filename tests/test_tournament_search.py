@@ -17,6 +17,7 @@ from bot.tournament_search import (
     RANGA_PREFIX,
     TournamentOption,
     cap_results,
+    categories_for_own_category,
     category_is_available,
     category_selected_text,
     category_short_label,
@@ -175,14 +176,36 @@ def test_cap_results_over_cap_truncates_to_first_40_and_flags_capped():
 
 
 def test_category_order_is_all_four_youngest_first():
-    # CLAUDE.md step 5.1: "all four are always offered" -- never filtered
-    # or reordered by the player's own age.
+    # The underlying display order is always all four, youngest first --
+    # categories_for_own_category (below) is what filters it per player.
     assert CATEGORY_ORDER == (
         AgeCategory.SKRZATY,
         AgeCategory.MLODZICY,
         AgeCategory.KADECI,
         AgeCategory.JUNIORZY,
     )
+
+
+# --- categories_for_own_category: PROBLEM 1a --------------------------------
+
+
+def test_own_category_none_offers_all_four():
+    # CLAUDE.md step 8.3, PROBLEM 1a: a missing own category (should not
+    # happen for a registered player, but must never crash or guess) shows
+    # every category rather than blocking the player outright.
+    assert categories_for_own_category(None) == CATEGORY_ORDER
+
+
+def test_u12_player_is_offered_all_four_categories():
+    assert categories_for_own_category(AgeCategory.SKRZATY) == CATEGORY_ORDER
+
+
+def test_u16_player_is_offered_only_u16_and_u18():
+    assert categories_for_own_category(AgeCategory.KADECI) == (AgeCategory.KADECI, AgeCategory.JUNIORZY)
+
+
+def test_u18_player_is_offered_only_u18():
+    assert categories_for_own_category(AgeCategory.JUNIORZY) == (AgeCategory.JUNIORZY,)
 
 
 def test_category_short_label_is_u_form_not_enum_name():

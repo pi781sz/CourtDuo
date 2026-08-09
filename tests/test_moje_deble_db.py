@@ -193,9 +193,12 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
     # only message -- no per-invitation follow-ups.
     assert len(texts) == 1
     lines = texts[0].split("\n")
-    assert lines[0] == "WTK Uniejów - " + f"{earlier:%d.%m.%Y}"
-    assert lines[1] == "🟢 Gracie razem: Jagoda Testowa"
-    assert "" in lines  # blank line separates the two tournament blocks
+    # CLAUDE.md step 8.3, PROBLEM 6: a heading as the first line.
+    assert lines[0] == "Moje deble"
+    assert lines[1] == ""
+    assert lines[2] == "WTK Uniejów - " + f"{earlier:%d.%m.%Y}"
+    assert lines[3] == "🟢 Gracie razem: Jagoda Testowa"
+    assert "" in lines[4:]  # blank line separates the two tournament blocks
     assert f"WTK Zielona Góra - {later:%d.%m.%Y}" in lines
     assert "🟠 Wysłane do: Maja Testowa" in lines
     assert "🔴 Odmowa: Bartosz Testowy" in lines
@@ -230,10 +233,13 @@ async def test_received_pending_reads_differently_and_is_actionable(db_session: 
 
     markup = _markups(message)[1]
     button_texts = _button_texts(markup)
-    assert len(button_texts) == 3
+    # CLAUDE.md step 8.3, PROBLEM 3: a fourth Menu button alongside the
+    # three answers.
+    assert len(button_texts) == 4
     assert any("Zatwierdź" in text for text in button_texts)
     assert any("Odrzuć" in text for text in button_texts)
     assert any("Nie jadę na ten turniej" in text for text in button_texts)
+    assert any("Menu" in text for text in button_texts)
 
 
 async def test_one_follow_up_message_per_pending_received_invitation(db_session: AsyncSession):
@@ -256,7 +262,7 @@ async def test_one_follow_up_message_per_pending_received_invitation(db_session:
     assert any("Karol Testowy" in text for text in follow_ups)
     assert any("Ola Testowa" in text for text in follow_ups)
     for markup in _markups(message)[1:]:
-        assert len(_button_texts(markup)) == 3
+        assert len(_button_texts(markup)) == 4
 
 
 # --- WHAT IT HIDES: finished tournaments, day boundary --------------------------

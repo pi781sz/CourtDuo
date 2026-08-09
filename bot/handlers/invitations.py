@@ -15,9 +15,9 @@ implies. That order matters twice over:
   player who blocked the bot must not cost the other three players their
   answer, so bot.notifications.push reports failure instead of raising.
   The one case where a failed push does change the outcome is a brand new
-  invitation: an invitation nobody can see must not sit ⚪ pending
+  invitation: an invitation nobody can see must not sit 🟠 pending
   forever, so it is cancelled and the inviter is told (CLAUDE.md's "do not
-  leave the inviter waiting on a ⚪ that can never resolve").
+  leave the inviter waiting on a 🟠 that can never resolve").
 
 The three answer handlers carry no state filter. The invitee may be
 anywhere — mid tournament search, or in no state at all — and answering an
@@ -88,6 +88,7 @@ _SEND_FAILURE_KEYS: dict[SendFailure, str] = {
     SendFailure.GENDER_MISMATCH: "partner_selection.gender_mismatch",
     SendFailure.INVITER_ALREADY_MATCHED: "partner_selection.inviter_already_matched",
     SendFailure.INVITEE_ALREADY_MATCHED: "partner_selection.invitee_already_matched",
+    SendFailure.ALREADY_ANSWERED: "partner_selection.already_answered",
     SendFailure.PENDING_INVITATION_EXISTS: "partner_selection.pending_invitation_exists",
     SendFailure.ALREADY_INVITED_BY_INVITEE: "invitation.already_invited_by_invitee",
     SendFailure.MAX_PENDING_REACHED: "partner_selection.max_pending_reached",
@@ -218,8 +219,7 @@ async def handle_confirm_send(
         # it to.
         await callback.message.answer(t("tournament_search.tournament_gone", lang))
         if account is not None:
-            gender = crud.gender_for_account_code(account.gender)
-            await start_tournament_search(callback.message, state, lang, session, gender)
+            await start_tournament_search(callback.message, state, lang, session, account)
         return
 
     result = await send_invitation(session, account, tournament, invitee, _now())
@@ -234,8 +234,7 @@ async def handle_confirm_send(
             reply_markup=reply_markup,
         )
         if result.failure in _SEND_FAILURES_RESTARTING_SEARCH:
-            gender = crud.gender_for_account_code(account.gender)
-            await start_tournament_search(callback.message, state, lang, session, gender)
+            await start_tournament_search(callback.message, state, lang, session, account)
             return
         # Everything else leaves the tournament chosen and the player free
         # to name somebody else straight away.
@@ -255,7 +254,7 @@ async def handle_confirm_send(
     )
     if not delivered:
         # Nobody will ever answer this one, so it must not count against
-        # the inviter's three pending invitations or sit ⚪ for weeks.
+        # the inviter's three pending invitations or sit 🟠 for weeks.
         invitation.state = InvitationState.CANCELLED
         await session.commit()
         logger.warning("Invitation %s cancelled: could not be delivered", invitation.id)

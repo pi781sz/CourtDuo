@@ -34,7 +34,7 @@ from bot.keyboards.invitations import invitation_answer_keyboard
 from bot.keyboards.navigation import terminal_keyboard
 from bot.keyboards.tournament_search import category_keyboard
 from bot.states import PartnerSelection, TournamentSearch
-from bot.tournament_search import label_for_tournament
+from bot.tournament_search import category_short_label, label_for_tournament
 from core.text import display_name, fold_diacritics
 from db import crud
 from db.models import Account, AgeCategory, Invitation, Player, Tournament
@@ -195,7 +195,9 @@ async def build_candidate_options(
 class CheckFailure(Enum):
     SELF_INVITE = auto()
     GENDER_MISMATCH = auto()
+    AGE_INELIGIBLE = auto()
     INVITEE_ALREADY_MATCHED = auto()
+    ALREADY_ANSWERED = auto()
     PENDING_INVITATION_EXISTS = auto()
     MAX_PENDING_REACHED = auto()
 
@@ -204,9 +206,10 @@ async def run_pre_invitation_checks(
     session: AsyncSession, account: Account, tournament: Tournament, candidate: Player
 ) -> CheckFailure | None:
     """CLAUDE.md, "Pre-invitation checks", run against an already-resolved
-    candidate -- checks 1, 2, 4, 5 and 6 in that order. Check 3 ("the
-    inviter is already matched") runs earlier, in start_partner_selection,
-    before a name is even asked for.
+    candidate -- checks 1, 2, 4, 5 and 6 in that order, plus step 8.3's age
+    (PROBLEM 1b) and re-invite (PROBLEM 5) additions. Check 3 ("the inviter
+    is already matched") runs earlier, in start_partner_selection, before a
+    name is even asked for.
     """
     if candidate.pzt_id == account.pzt_id:
         return CheckFailure.SELF_INVITE
@@ -215,8 +218,28 @@ async def run_pre_invitation_checks(
     if candidate.gender != event_gender:
         return CheckFailure.GENDER_MISMATCH
 
+    # CLAUDE.md step 8.3, PROBLEM 1b: a player may play up but never down --
+    # the tournament's own category is the ceiling for the named player
+    # too, not just the inviter's own category screen (PROBLEM 1a). Run
+    # before the "does not use CourtDuo yet" check (bot.invitation_send),
+    # which this call entirely precedes, so an age refusal is never masked
+    # by that unrelated one. `candidate_category` is None when the named
+    # player has no ranking rows at all -- never guess an age, so this
+    # falls through to the rest of the checks instead of blocking.
+    candidate_category = await crud.get_player_own_age_category(session, candidate.pzt_id)
+    if candidate_category is not None and candidate_category.value > tournament.age_category.value:
+        return CheckFailure.AGE_INELIGIBLE
+
     if await crud.get_matched_invitation(session, candidate.pzt_id, tournament.guid) is not None:
         return CheckFailure.INVITEE_ALREADY_MATCHED
+
+    # CLAUDE.md step 8.3, PROBLEM 5: this inviter already asked this named
+    # player for this tournament and was told REJECTED or NOT_ATTENDING --
+    # re-inviting the same person is pestering, not a fresh attempt.
+    # Directional: the named player inviting this account back afterwards
+    # is a separate action and not blocked by this check.
+    if await crud.get_answered_invitation(session, account.pzt_id, candidate.pzt_id, tournament.guid) is not None:
+        return CheckFailure.ALREADY_ANSWERED
 
     if await crud.get_pending_invitation(session, account.pzt_id, candidate.pzt_id, tournament.guid) is not None:
         return CheckFailure.PENDING_INVITATION_EXISTS
@@ -231,7 +254,9 @@ async def run_pre_invitation_checks(
 _CHECK_FAILURE_MESSAGE_KEYS: dict[CheckFailure, str] = {
     CheckFailure.SELF_INVITE: "partner_selection.self_invite",
     CheckFailure.GENDER_MISMATCH: "partner_selection.gender_mismatch",
+    CheckFailure.AGE_INELIGIBLE: "partner_selection.invitee_too_old",
     CheckFailure.INVITEE_ALREADY_MATCHED: "partner_selection.invitee_already_matched",
+    CheckFailure.ALREADY_ANSWERED: "partner_selection.already_answered",
     CheckFailure.PENDING_INVITATION_EXISTS: "partner_selection.pending_invitation_exists",
     CheckFailure.MAX_PENDING_REACHED: "partner_selection.max_pending_reached",
 }
@@ -285,7 +310,12 @@ async def handle_partner_candidate(
     if failure is not None:
         reply_markup = terminal_keyboard(lang) if failure in _CHECK_FAILURE_TERMINAL else None
         await message.answer(
-            t(_CHECK_FAILURE_MESSAGE_KEYS[failure], lang, name=display_name(candidate.full_name)),
+            t(
+                _CHECK_FAILURE_MESSAGE_KEYS[failure],
+                lang,
+                name=display_name(candidate.full_name),
+                category=category_short_label(tournament.age_category, lang),
+            ),
             reply_markup=reply_markup,
         )
         return
@@ -328,9 +358,14 @@ async def start_partner_selection(
         # No name to ask for -- CLAUDE.md, "Never dead-end": offer a way
         # back to the tournament list rather than leaving nothing to tap.
         gender = crud.gender_for_account_code(account.gender)
+        own_category = await crud.get_player_own_age_category(session, account.pzt_id)
         today, now = _warsaw_today_and_utc_now()
         counts = await crud.get_eligible_tournament_counts_by_category(session, gender, today, now)
-        await message.answer(t("tournament_search.ask_category", lang), reply_markup=category_keyboard(counts, lang))
+        heading = t("tournament_search.category_heading", lang)
+        body = t("tournament_search.ask_category", lang)
+        await message.answer(
+            f"{heading}\n{body}", reply_markup=category_keyboard(counts, lang, own_category)
+        )
         await state.set_state(TournamentSearch.waiting_category)
         return
 
