@@ -459,13 +459,38 @@ Every invitation must route through `can_send_invitation`. When paid tiers launc
 
 ## Build order
 
+All ten steps are built, merged, deployed and tested end-to-end against live PZT
+data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.7, 10.1–10.2) were
+corrections and refinements found by live testing; their behaviour is documented
+in the relevant sections above, which are the authoritative description.
+
 1. ~~Tournament scraper with doubles detection~~ **done**
 2. ~~Ranking scraper, alphabetical lists~~ **done**
-3. ~~Database schema and upserts~~ **done — needs revision for this spec**
-4. Registration by PZT ID
-5. Tournament selection by place
-6. Pre-invitation checks
-7. Invitation send / accept / reject with atomic locking
-8. ~~Status view and notifications~~ **done**
-9. Non-user invite flow and the "they joined" callback
+3. ~~Database schema and upserts~~ **done**
+4. ~~Registration by PZT ID~~ **done**
+5. ~~Tournament selection by place~~ **done** (age category first, 28-day window, ranga prefix, DD.MM.YYYY)
+6. ~~Pre-invitation checks~~ **done** (incl. age eligibility, re-invite blocking, already-invited-by-them)
+7. ~~Invitation send / accept / reject / not-attending with atomic locking~~ **done** (incl. sender cancellation)
+8. ~~Status view and notifications — "Moje deble"~~ **done**
+9. ~~Non-user invite flow and the "they joined" callback~~ **done** (incl. the inviter referrer token, recorded but never displayed)
 10. ~~Read-only viewers (allowlisted test feature)~~ **done**
+
+## Not yet built
+
+Not part of the original build order, but required before real users:
+
+- **Staleness alarm.** The bot checks the newest `scraped_at` in `tournaments` on
+  startup and periodically; if older than ~36 hours it messages the operator on
+  Telegram. Without it a dead scraper is invisible: the bot keeps serving stale
+  data until every tournament ages out of the 28-day window, and then answers
+  every search with "nothing found" — indistinguishable from a genuine empty
+  result.
+- **Scrapers on systemd timers** rather than GitHub Actions cron, with a
+  `workflow_dispatch`-only workflow kept as a manual fallback.
+- **Account deletion and blocking.** Deleting alone is not enough — a deleted
+  player can re-register in seconds, so blocking needs its own persistent flag.
+  Deletion must also answer what happens to a partner whose confirmed match is
+  removed. Required for GDPR erasure; the data is children's names.
+- **Results-confirmed verification.** Scrape `TournamentResults.aspx` after
+  tournaments end and check whether a matched pair actually appears in the
+  doubles draw. Collect the data before showing any badge.
