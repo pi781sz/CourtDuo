@@ -28,11 +28,13 @@ from bot.handlers import (
     partner_selection_router,
     pending_external_invites_router,
     start_router,
+    status_router,
     tournament_search_router,
     viewers_router,
 )
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.viewer_guard import ViewerActionGuardMiddleware
+from bot.staleness import register as register_staleness_alarm
 
 load_dotenv()
 
@@ -58,6 +60,10 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     # query regardless of which router would otherwise have handled it.
     dispatcher.callback_query.middleware(ViewerActionGuardMiddleware())
 
+    # CLAUDE.md "Operations": /status is registered before every other
+    # router so nothing else gets a chance to intercept it first.
+    dispatcher.include_router(status_router)
+
     # navigation/moje_deble/invite_friend/viewers registered first:
     # CLAUDE.md step 8.4's persistent reply keyboard adds exact-text
     # message handlers ("Znajdź partnera", "Moje deble", "Zaproś na
@@ -76,6 +82,10 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     dispatcher.include_router(partner_selection_router)
     dispatcher.include_router(invitations_router)
     dispatcher.include_router(pending_external_invites_router)
+
+    # CLAUDE.md "Operations": the staleness alarm's background task,
+    # spawned on dispatcher startup and cancelled on shutdown.
+    register_staleness_alarm(dispatcher)
     return dispatcher
 
 

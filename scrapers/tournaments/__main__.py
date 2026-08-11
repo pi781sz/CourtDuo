@@ -16,14 +16,18 @@ import asyncio
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 
 from core.http import build_client
+from db import crud
 from db.crud import store_tournaments
 from db.session import get_session_factory
 
 from .models import AgeCategory
 from .parser import find_tournament_html_at
 from .scraper import fetch_category_html, scrape_all
+
+SCRAPER_NAME = "tournaments"
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:
@@ -85,9 +89,10 @@ async def _run(args: argparse.Namespace) -> int:
         sys.stdout.write("\n")
         return 0
 
-    tournaments = await scrape_all(categories)
-
     if args.dry_run:
+        # Debugging path (module docstring): writes nothing, not even a
+        # scraper_runs row, and needs no DATABASE_URL.
+        tournaments = await scrape_all(categories)
         payload_tournaments = tournaments
         if args.doubles_only:
             payload_tournaments = [t for t in payload_tournaments if t.has_doubles]
@@ -101,18 +106,56 @@ async def _run(args: argparse.Namespace) -> int:
         )
         return 0
 
+    # A real run: exactly one scraper_runs row is written below, success or
+    # failure (CLAUDE.md "Operations" -- the staleness alarm's whole
+    # premise is that a scraper that stops running must not be invisible).
+    # scrape_all itself is inside the try too, since "the scrape raised" is
+    # one of the documented ok=False cases.
     session_factory = get_session_factory()
-    async with session_factory() as session:
-        written, doubles_events = await store_tournaments(session, tournaments)
-        await session.commit()
-
-    logging.info(
-        "Scraped %d tournaments, wrote %d to the database (%d doubles events)",
-        len(tournaments),
-        written,
-        doubles_events,
-    )
-    return 0
+    started_at = datetime.now(timezone.utc)
+    items_seen: int | None = None
+    items_written: int | None = None
+    ok = False
+    detail: str | None = None
+    exit_code = 0
+    try:
+        tournaments = await scrape_all(categories)
+        items_seen = len(tournaments)
+        async with session_factory() as session:
+            written, doubles_events = await store_tournaments(session, tournaments)
+            await session.commit()
+        items_written = written
+        ok = items_seen > 0 and items_written > 0
+        if ok:
+            logging.info(
+                "Scraped %d tournaments, wrote %d to the database (%d doubles events)",
+                len(tournaments),
+                written,
+                doubles_events,
+            )
+        else:
+            detail = "Zero tournaments scraped or written across all categories"
+            logging.error(detail)
+            exit_code = 1
+    except Exception as exc:  # noqa: BLE001 -- must still record the run row below
+        detail = f"{type(exc).__name__}: {exc}"[:500]
+        logging.exception("Tournaments scraper failed")
+        exit_code = 1
+    finally:
+        finished_at = datetime.now(timezone.utc)
+        try:
+            async with session_factory() as run_session:
+                await crud.record_scraper_run(
+                    run_session, SCRAPER_NAME, started_at, finished_at, ok, items_seen, items_written, detail
+                )
+                await run_session.commit()
+        except Exception:
+            # Per CLAUDE.md "Operations": if the database itself is
+            # unreachable the row cannot be written -- that IS a staleness
+            # condition, and bot.staleness catches it as "no successful
+            # run" on its own. Nothing more to do here than log.
+            logging.exception("Failed to record scraper_runs row for %s", SCRAPER_NAME)
+    return exit_code
 
 
 def main(argv: list[str] | None = None) -> int:
