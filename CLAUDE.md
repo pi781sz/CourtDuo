@@ -457,6 +457,43 @@ Every invitation must route through `can_send_invitation`. When paid tiers launc
 
 ---
 
+## Operations
+
+**Staleness alarm.** Without it a dead scraper is invisible: the bot keeps serving whatever is already in the database until every tournament ages out of the 28-day window (see "Tournament selection"), and then answers every search with "nothing found" — indistinguishable from a genuine empty result.
+
+There is no `tournaments.scraped_at` column, and none should ever be added. `Tournament.updated_at` (`TimestampMixin`) cannot stand in for it either: `db.crud.upsert_tournament` writes via `INSERT ... ON CONFLICT DO UPDATE`, and SQLAlchemy does not apply a column's `onupdate` on that path, so `updated_at` freezes at whatever moment a tournament GUID was first inserted and never moves again on a re-scrape. The real mechanism is two tables:
+
+```
+scraper_runs
+  id             integer primary key
+  scraper        text not null        -- 'tournaments' or 'rankings'
+  started_at     timestamptz not null
+  finished_at    timestamptz not null
+  ok             boolean not null
+  items_seen     integer null
+  items_written  integer null
+  detail         text null            -- short failure summary when ok is false; never a stack trace, never a player name
+
+alarm_state
+  key            text primary key     -- the scraper name
+  firing         boolean not null
+  last_sent_at   timestamptz null
+```
+
+`python -m scrapers.tournaments` and `python -m scrapers.rankings` write exactly one `scraper_runs` row per real invocation — success or failure, in its own transaction separate from the data write, so a run that fails halfway through writing data still records that it failed. `--dry-run`, `--dump-html` and `--dump-index-html` write nothing. `ok` is false when the scrape raised, when rankings couldn't discover the published period, or when `items_seen`/`items_written` came back zero — a parser failure, not a quiet month. A run of failures never resets the clock: `bot.staleness` only ever measures against the newest `ok=true` row.
+
+Thresholds (`bot.staleness`, module-level constants, each overridable by an environment variable): tournaments 36 hours (`STALENESS_TOURNAMENTS_HOURS`), rankings 216 hours / 9 days (`STALENESS_RANKINGS_HOURS`) — rankings run weekly outside the first ten days of a month (see "Scraper scheduling"), so a 36-hour threshold would false-alarm every week.
+
+Checked 30 seconds after startup, then every 6 hours — not hourly. Each check wakes a scaled-to-zero Neon compute, and the free plan's compute-hours are shared across every branch; against a 36-hour threshold, a 6-hour cadence still catches a dead scraper within hours of it mattering, and the damage a slower alarm guards against takes weeks, not hours.
+
+`alarm_state` is a table, not an in-memory flag, because the bot runs under `Restart=always` — in-memory state would send one fresh alert per restart during a crash loop instead of one alert followed by silence until recovery. Alerts go to every id in `ALARM_TELEGRAM_IDS` (comma-separated numeric Telegram ids, read fresh on every check, exactly like `entitlements._allowlisted_pzt_ids`; never a hardcoded id, `.env.example` ships it empty), with a reminder every 24 hours while still stale and one recovery message once a fresh successful run lands. Unset or empty is valid — the alarm still runs and still logs at WARNING, it just has nobody to tell. If the staleness check's own database query raises (exhausted Neon quota, wrong credentials, network), that IS an alarm condition and is sent too, deduped in memory at most once per 6 hours per scraper — the one place in-memory dedupe is correct here, since the table that would hold real dedupe state is by definition what's unreachable.
+
+The alarm's message text is operator-facing English, hardcoded in `bot.staleness` rather than routed through `t()`/`locales/pl.json` — a deliberate, narrow exception to "never hardcode user-facing strings" above. These strings never reach a player: only an id in `ALARM_TELEGRAM_IDS` (an operator, never a child) ever sees them, and putting operator text in `locales/pl.json` would put it one bad lookup away from a child's screen.
+
+**`/status`**, operator-only and gated on the same `ALARM_TELEGRAM_IDS`: plain text, no buttons, no reply keyboard, showing each scraper's last successful run and how long ago, its last run and outcome, and whether it is currently inside its threshold. Registered first in `bot.main` so no other router can intercept it. To anybody not on that list it does nothing at all — no reply, no error — a child typing it sees exactly what they'd see typing any other unknown command.
+
+---
+
 ## Build order
 
 All ten steps are built, merged, deployed and tested end-to-end against live PZT
@@ -479,12 +516,6 @@ in the relevant sections above, which are the authoritative description.
 
 Not part of the original build order, but required before real users:
 
-- **Staleness alarm.** The bot checks the newest `scraped_at` in `tournaments` on
-  startup and periodically; if older than ~36 hours it messages the operator on
-  Telegram. Without it a dead scraper is invisible: the bot keeps serving stale
-  data until every tournament ages out of the 28-day window, and then answers
-  every search with "nothing found" — indistinguishable from a genuine empty
-  result.
 - **Scrapers on systemd timers** rather than GitHub Actions cron, with a
   `workflow_dispatch`-only workflow kept as a manual fallback.
 - **Account deletion and blocking.** Deleting alone is not enough — a deleted

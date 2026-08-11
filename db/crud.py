@@ -40,6 +40,7 @@ from .models import (
     Account,
     AccountViewer,
     AgeCategory,
+    AlarmState,
     Event,
     Gender,
     Invitation,
@@ -48,6 +49,7 @@ from .models import (
     Player,
     Ranking,
     RankingList,
+    ScraperRun,
     Tournament,
     ViewerInviteToken,
 )
@@ -920,3 +922,90 @@ async def revoke_viewer(session: AsyncSession, account_id: int, viewer_id: int, 
     row.revoked_at = now
     await session.flush()
     return row
+
+
+# --- Staleness alarm (CLAUDE.md "Operations") --------------------------------
+
+
+async def record_scraper_run(
+    session: AsyncSession,
+    scraper: str,
+    started_at: datetime,
+    finished_at: datetime,
+    ok: bool,
+    items_seen: int | None,
+    items_written: int | None,
+    detail: str | None,
+) -> ScraperRun:
+    """Records one invocation of a scraper. Callers (scrapers.tournaments
+    and scrapers.rankings __main__ modules) write this in a session of its
+    own, separate from the session that wrote the scraped data, and commit
+    it independently -- so a run that fails halfway through the data write
+    still leaves a row behind saying so (CLAUDE.md "Operations").
+    """
+    run = ScraperRun(
+        scraper=scraper,
+        started_at=started_at,
+        finished_at=finished_at,
+        ok=ok,
+        items_seen=items_seen,
+        items_written=items_written,
+        detail=detail,
+    )
+    session.add(run)
+    await session.flush()
+    return run
+
+
+async def get_latest_successful_scraper_run(session: AsyncSession, scraper: str) -> ScraperRun | None:
+    """The newest ok=True row for `scraper` -- what bot.staleness measures
+    staleness against. A run of failures never moves this: only a
+    successful run does (CLAUDE.md "Operations", "a run of failures does
+    not reset the clock").
+    """
+    result = await session.execute(
+        select(ScraperRun)
+        .where(ScraperRun.scraper == scraper, ScraperRun.ok.is_(True))
+        .order_by(ScraperRun.finished_at.desc())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_latest_scraper_run(session: AsyncSession, scraper: str) -> ScraperRun | None:
+    """The newest row for `scraper` regardless of outcome -- used to show
+    "last run: failed - <detail>" alongside the last *successful* run.
+    """
+    result = await session.execute(
+        select(ScraperRun).where(ScraperRun.scraper == scraper).order_by(ScraperRun.finished_at.desc()).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_alarm_state(session: AsyncSession, key: str) -> AlarmState | None:
+    # populate_existing: without it, a `key` already in this session's
+    # identity map (e.g. read once, then updated via set_alarm_state's own
+    # Core-level UPSERT, which bypasses the ORM and never touches the
+    # identity map) would be returned with its stale, pre-update attribute
+    # values instead of a fresh read -- the same trap
+    # lock_tournament_invitations_for_players documents above.
+    result = await session.execute(
+        select(AlarmState).where(AlarmState.key == key).execution_options(populate_existing=True)
+    )
+    return result.scalar_one_or_none()
+
+
+async def set_alarm_state(session: AsyncSession, key: str, firing: bool, last_sent_at: datetime | None) -> AlarmState:
+    """Upserts the (firing, last_sent_at) pair for one scraper's alarm.
+    Persistent rather than in-memory (CLAUDE.md "Operations": the service
+    runs with Restart=always, and in-memory state would fire one alert per
+    restart during a crash loop).
+    """
+    values = {"firing": firing, "last_sent_at": last_sent_at}
+    stmt = insert(AlarmState).values(key=key, **values)
+    stmt = stmt.on_conflict_do_update(index_elements=[AlarmState.key], set_=values)
+    await session.execute(stmt)
+    result = await session.execute(
+        select(AlarmState).where(AlarmState.key == key).execution_options(populate_existing=True)
+    )
+    return result.scalar_one()

@@ -5,10 +5,12 @@ from .navigation import router as navigation_router
 from .partner_selection import router as partner_selection_router
 from .pending_external_invites import router as pending_external_invites_router
 from .start import router as start_router
+from .status import router as status_router
 from .tournament_search import router as tournament_search_router
 from .viewers import router as viewers_router
 
 __all__ = [
+    "status_router",
     "start_router",
     "tournament_search_router",
     "partner_selection_router",
