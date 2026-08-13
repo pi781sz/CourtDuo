@@ -10,7 +10,6 @@ from __future__ import annotations
 from datetime import date
 
 from bot.handlers.tournament_search import _results_text
-from bot.keyboards.navigation import FindPartnerCallback, MojeDebleCallback
 from bot.keyboards.tournament_search import (
     ChangeCategoryCallback,
     ChangePlaceCallback,
@@ -111,18 +110,17 @@ def test_no_matches_keyboard_still_offers_show_all_and_change_place():
     assert any("kategori" in text.lower() for text in texts)
 
 
-def test_category_keyboard_offers_moje_deble_and_find_partner_too():
-    # CLAUDE.md build order step 8: "Add 'Moje deble' alongside 'Znajdź
-    # partnera' on the age-category screen too."
+def test_category_keyboard_has_no_navigation_buttons():
+    # CLAUDE.md step 12.1, PROBLEM 6: "Moje deble" and "Znajdź partnera"
+    # must not appear in this grid of category choices any more -- both
+    # already live on the persistent reply keyboard, and mixing them in
+    # here risked a mis-tap losing the player's place.
     counts = {category: 1 for category in CATEGORY_ORDER}
     markup = category_keyboard(counts, "pl")
 
     texts = _all_button_texts(markup)
-    assert "Moje deble" in texts
-    assert "Znajdź partnera" in texts
-    prefixes = _callback_prefixes(markup)
-    assert MojeDebleCallback.__prefix__ in prefixes
-    assert FindPartnerCallback.__prefix__ in prefixes
+    assert "Moje deble" not in texts
+    assert "Znajdź partnera" not in texts
 
 
 def test_no_pagination_callback_classes_remain():

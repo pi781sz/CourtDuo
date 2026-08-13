@@ -39,8 +39,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.viewers import render_moje_deble_for_viewer
 from bot.i18n import all_translations, t
-from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard, release_match_keyboard
-from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard, persistent_menu_keyboard
+from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard
+from bot.keyboards.navigation import (
+    MojeDebleCallback,
+    find_partner_keyboard,
+    moje_deble_summary_keyboard,
+    persistent_menu_keyboard,
+)
 from bot.lang import lang_for
 from bot.moje_deble import (
     entry_line,
@@ -83,9 +88,16 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     # state -- it would only point back at the screen the player is
     # already looking at. Step 8.3, PROBLEM 6: a heading as the first line,
     # so a player scrolling back through the chat knows what this message is.
+    # Step 12.1, PROBLEM 4: a stranded match's own "Usuń" button rides
+    # along on this same keyboard -- its status line is already in `body`,
+    # so it must not be repeated in a follow-up message just to have
+    # somewhere to hang the button.
     heading = t("moje_deble.heading", lang)
     body = render_groups(groups, lang)
-    await message.answer(f"{heading}\n\n{body}", reply_markup=find_partner_keyboard(lang))
+    release_ids = [entry.invitation_id for entry in partner_deleted_entries(groups)]
+    await message.answer(
+        f"{heading}\n\n{body}", reply_markup=moje_deble_summary_keyboard(lang, release_ids)
+    )
 
     # One follow-up message per still-open received invitation, each with
     # its own answer keyboard, since a single summary message can't carry
@@ -101,13 +113,6 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     for entry in pending_sent_entries(groups):
         await message.answer(
             entry_line(entry, lang), reply_markup=cancel_invitation_keyboard(entry.invitation_id, lang)
-        )
-    # CLAUDE.md step 12: the same treatment for a match whose partner
-    # deleted their account, with the single "Zwolnij parę" button instead
-    # -- the remaining player's own manual escape.
-    for entry in partner_deleted_entries(groups):
-        await message.answer(
-            entry_line(entry, lang), reply_markup=release_match_keyboard(entry.invitation_id, lang)
         )
 
 

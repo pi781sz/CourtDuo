@@ -14,7 +14,6 @@ from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.i18n import t
-from bot.keyboards.navigation import FindPartnerCallback, MojeDebleCallback
 from bot.tournament_search import (
     TournamentOption,
     categories_for_own_category,
@@ -60,10 +59,12 @@ def category_keyboard(
         else:
             text = t("tournament_search.category_unavailable", lang, category=short)
         builder.button(text=text, callback_data=CategorySelectCallback(category=category.name))
-    # CLAUDE.md build order step 8: "Add 'Moje deble' alongside 'Znajdź
-    # partnera' on the age-category screen too."
-    builder.button(text=t("common.moje_deble_button", lang), callback_data=MojeDebleCallback())
-    builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
+    # CLAUDE.md step 12.1, PROBLEM 6: no "Moje deble" / "Znajdź partnera"
+    # buttons here -- both already live on the persistent reply keyboard
+    # below the input box, and mixing them into this grid of real choices
+    # (the category buttons) risked a mis-tap losing the player's place.
+    # An inline keyboard carries only the choices relevant to its own
+    # message; navigation lives on the persistent keyboard alone.
     builder.adjust(2)
     return builder.as_markup()
 

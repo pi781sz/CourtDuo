@@ -86,8 +86,9 @@ async def handle_usun_konto(message: Message, session: AsyncSession) -> None:
         # delete, so point them at /start instead of leaving a dead end.
         await message.answer(t("moje_deble.not_registered", lang), reply_markup=persistent_menu_keyboard(lang))
         return
+    has_viewers = await crud.count_active_viewers(session, account.id) > 0
     await message.answer(
-        explain_screen_text(account.gender, lang), reply_markup=delete_account_explain_keyboard(lang)
+        explain_screen_text(account.gender, lang, has_viewers), reply_markup=delete_account_explain_keyboard(lang)
     )
 
 
@@ -225,7 +226,7 @@ async def handle_release_match_start(
     except TelegramAPIError as exc:
         logger.info("Could not clear release-match buttons: %s", exc)
     await callback.message.answer(
-        release_confirm_text(account.gender, lang),
+        release_confirm_text(lang),
         reply_markup=release_match_confirm_keyboard(callback_data.invitation_id, lang),
     )
 

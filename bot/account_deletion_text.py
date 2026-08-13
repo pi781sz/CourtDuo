@@ -29,23 +29,30 @@ from bot.invitation_text import gendered
 from core.text import display_name
 
 
-def explain_screen_text(gender_code: str, lang: str) -> str:
+def explain_screen_text(gender_code: str, lang: str, has_viewers: bool = False) -> str:
     """CLAUDE.md step 12, "Self-service deletion": "the confirmation
     screen must state plainly what will happen, including the effect on
-    any confirmed match." Screen one of two."""
-    return "\n".join(
-        (
-            t("deletion.explain_heading", lang),
-            "",
-            t("deletion.explain_intro", lang),
-            t("deletion.explain_bullet_account", lang),
-            t("deletion.explain_bullet_invitations", lang),
-            gendered("deletion.explain_bullet_matches", gender_code, lang),
-            t("deletion.explain_bullet_viewers", lang),
-            "",
-            t("deletion.explain_irreversible", lang),
-        )
-    )
+    any confirmed match." Screen one of two.
+
+    Step 12.1, PROBLEM 2: the viewer bullet is confusing for the near-
+    totality of accounts that have never granted anyone a viewer -- shown
+    only when `has_viewers` is true, i.e. the account has at least one
+    active grant left to lose. The string itself stays in locales/pl.json
+    unchanged for the accounts that do need it.
+    """
+    lines = [
+        t("deletion.explain_heading", lang),
+        "",
+        t("deletion.explain_intro", lang),
+        t("deletion.explain_bullet_account", lang),
+        t("deletion.explain_bullet_invitations", lang),
+        gendered("deletion.explain_bullet_matches", gender_code, lang),
+    ]
+    if has_viewers:
+        lines.append(t("deletion.explain_bullet_viewers", lang))
+    lines.append("")
+    lines.append(t("deletion.explain_irreversible", lang))
+    return "\n".join(lines)
 
 
 def confirm_screen_text(lang: str) -> str:
@@ -60,12 +67,11 @@ def partner_notified_text(deleted_full_name: str, deleted_gender: str, lang: str
     return gendered("deletion.partner_notified", deleted_gender, lang, name=display_name(deleted_full_name))
 
 
-def release_confirm_text(remaining_gender_code: str, lang: str) -> str:
-    """CLAUDE.md step 12: "a confirmation that says clearly this cannot be
-    undone and they should only use it if they have actually spoken to the
-    other person" -- gendered on the *remaining* player's own gender, the
-    one actually typing/tapping this screen."""
-    return gendered("deletion.release_confirm_prompt", remaining_gender_code, lang)
+def release_confirm_text(lang: str) -> str:
+    """CLAUDE.md step 12.1, PROBLEM 5: "Czy na pewno chcesz usunąć tego
+    debla?" -- genderless (no inflected verb), so unlike the rest of this
+    module's inflected pairs this is a flat key, not gendered()."""
+    return t("deletion.release_confirm_prompt", lang)
 
 
 def release_done_text(remaining_gender_code: str, tournament: str, lang: str) -> str:

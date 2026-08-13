@@ -22,11 +22,13 @@ from unittest.mock import AsyncMock, MagicMock
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from bot.account_deletion import delete_account
 from bot.handlers.moje_deble import (
     handle_moje_deble_button,
     handle_moje_deble_button_press,
     handle_moje_deble_command,
 )
+from bot.keyboards.invitations import ReleaseMatchCallback
 from bot.moje_deble import group_by_tournament, render_groups
 from db import crud
 from db.models import Account, AgeCategory, Event, Gender, Invitation, InvitationState, Player, PlayType, Tournament
@@ -292,6 +294,35 @@ async def test_sent_pending_gets_cancel_button_received_pending_gets_answer_butt
 
     assert _button_texts(sent_follow_up[1]) == ["Anuluj zaproszenie"]
     assert _button_texts(received_follow_up[1]) == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
+
+
+# --- A stranded match (CLAUDE.md step 12.1, PROBLEM 4): shown once -------------
+
+
+async def test_stranded_match_appears_once_with_its_usun_button_on_the_summary(db_session: AsyncSession):
+    await _add_user(db_session, "MDB090", "Testowa Anna", telegram_id=910090)
+    await _add_user(db_session, "MDB091", "Testowa Jagoda", telegram_id=910091)
+    tournament = await _add_tournament(db_session, "mdb-t90", _FAR_FUTURE, venue_city="Warszawa")
+    matched = await _add_invitation(db_session, "MDB090", "MDB091", "mdb-t90", InvitationState.ACCEPTED)
+
+    jagoda = await crud.get_account_by_pzt_id(db_session, "MDB091")
+    await delete_account(db_session, jagoda, today=date(2026, 8, 7))
+    await db_session.flush()
+
+    message = _make_message(910090)
+    await handle_moje_deble_command(message, db_session)
+
+    texts = _texts(message)
+    # One message only -- the stranded-match line must not be repeated in
+    # a second, follow-up message.
+    assert len(texts) == 1
+    assert texts[0].count("potwierdź osobiście") == 1
+    assert "⚠️ Jagoda Testowa — potwierdź osobiście" in texts[0]
+
+    markup = _markups(message)[0]
+    assert _button_texts(markup) == ["Znajdź partnera", "Usuń"]
+    release_button = markup.inline_keyboard[-1][0]
+    assert release_button.callback_data == ReleaseMatchCallback(invitation_id=matched.id).pack()
 
 
 # --- WHAT IT HIDES: finished tournaments, day boundary --------------------------
