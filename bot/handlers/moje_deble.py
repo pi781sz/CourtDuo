@@ -39,12 +39,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.viewers import render_moje_deble_for_viewer
 from bot.i18n import all_translations, t
-from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard
+from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard, release_match_keyboard
 from bot.keyboards.navigation import MojeDebleCallback, find_partner_keyboard, persistent_menu_keyboard
 from bot.lang import lang_for
 from bot.moje_deble import (
     entry_line,
     group_by_tournament,
+    partner_deleted_entries,
     pending_received_entries,
     pending_sent_entries,
     render_groups,
@@ -100,6 +101,13 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     for entry in pending_sent_entries(groups):
         await message.answer(
             entry_line(entry, lang), reply_markup=cancel_invitation_keyboard(entry.invitation_id, lang)
+        )
+    # CLAUDE.md step 12: the same treatment for a match whose partner
+    # deleted their account, with the single "Zwolnij parę" button instead
+    # -- the remaining player's own manual escape.
+    for entry in partner_deleted_entries(groups):
+        await message.answer(
+            entry_line(entry, lang), reply_markup=release_match_keyboard(entry.invitation_id, lang)
         )
 
 

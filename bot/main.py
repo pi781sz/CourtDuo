@@ -21,6 +21,7 @@ from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.handlers import (
+    account_deletion_router,
     invitations_router,
     invite_friend_router,
     moje_deble_router,
@@ -82,6 +83,7 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     dispatcher.include_router(partner_selection_router)
     dispatcher.include_router(invitations_router)
     dispatcher.include_router(pending_external_invites_router)
+    dispatcher.include_router(account_deletion_router)
 
     # CLAUDE.md "Operations": the staleness alarm's background task,
     # spawned on dispatcher startup and cancelled on shutdown.

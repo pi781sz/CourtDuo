@@ -57,6 +57,11 @@ class SendFailure(Enum):
     send transaction rather than trusted from step 6."""
 
     NOT_ENTITLED = auto()
+    # CLAUDE.md step 12, "Blocking": either side's pzt_id is in
+    # blocked_pzt_ids. Deliberately mapped to the same neutral message as
+    # NOT_ENTITLED by bot.handlers.invitations -- a blocked player must not
+    # be told why (CLAUDE.md: "give no detail").
+    BLOCKED = auto()
     INVITEE_NOT_ON_COURTDUO = auto()
     SELF_INVITE = auto()
     GENDER_MISMATCH = auto()
@@ -104,6 +109,12 @@ async def send_invitation(
     # too; this is the call that actually gates the write.
     if not await can_send_invitation(account, tournament):
         return SendResult(failure=SendFailure.NOT_ENTITLED)
+
+    # CLAUDE.md step 12: "checked on every invitation send ... so a block
+    # takes effect immediately for someone already registered." Either
+    # side may have been blocked after their account was created.
+    if await crud.is_pzt_id_blocked(session, account.pzt_id) or await crud.is_pzt_id_blocked(session, invitee.pzt_id):
+        return SendResult(failure=SendFailure.BLOCKED)
 
     if invitee.pzt_id == account.pzt_id:
         return SendResult(failure=SendFailure.SELF_INVITE)
@@ -198,6 +209,10 @@ class RespondFailure(Enum):
     # The tapper is not this invitation's invitee. Callback payloads are
     # client-supplied, so this is an authorization check, not a sanity one.
     NOT_YOURS = auto()
+    # CLAUDE.md step 12, "Blocking": either side's pzt_id is in
+    # blocked_pzt_ids -- mapped to the same neutral "no longer valid"
+    # message as NOT_FOUND by bot.handlers.invitations.
+    BLOCKED = auto()
     ALREADY_ANSWERED = auto()
     # Cancelled by somebody else's accept: "Ten zawodnik znalazł już partnera."
     CANCELLED_BY_MATCH = auto()
@@ -261,6 +276,14 @@ async def accept_invitation(
         return RespondResult(failure=RespondFailure.NOT_FOUND)
     if invitation.invitee_pzt_id != responder_pzt_id:
         return RespondResult(failure=RespondFailure.NOT_YOURS)
+
+    # CLAUDE.md step 12: "checked on every ... accept, so a block takes
+    # effect immediately." Either side may have been blocked after this
+    # PENDING invitation was created.
+    if await crud.is_pzt_id_blocked(session, invitation.inviter_pzt_id) or await crud.is_pzt_id_blocked(
+        session, invitation.invitee_pzt_id
+    ):
+        return RespondResult(failure=RespondFailure.BLOCKED)
 
     players = (invitation.inviter_pzt_id, invitation.invitee_pzt_id)
     locked = await crud.lock_tournament_invitations_for_players(session, invitation.tournament_guid, players)
@@ -439,3 +462,69 @@ async def cancel_invitation(
     await session.flush()
     logger.info("Invitation %s cancelled by its inviter", current.id)
     return CancelResult(invitation=current)
+
+
+# --- Releasing a match after a partner's account deletion (CLAUDE.md step 12) --
+
+
+class ReleaseFailure(Enum):
+    NOT_FOUND = auto()
+    # The tapper is not one of this invitation's two players.
+    NOT_YOURS = auto()
+    # Not (or no longer) ACCEPTED -- nothing to release.
+    NOT_ACCEPTED = auto()
+    # Defense in depth: the other side's account is not (or no longer)
+    # deleted. Unreachable from the normal UI, which only ever shows the
+    # release button on an entry bot.moje_deble already flagged
+    # partner_account_deleted, but a stale button or replayed callback
+    # could still name a row that no longer qualifies.
+    PARTNER_NOT_DELETED = auto()
+
+
+@dataclass
+class ReleaseResult:
+    failure: ReleaseFailure | None = None
+    invitation: Invitation | None = None
+
+
+async def release_deleted_partner_match(
+    session: AsyncSession, invitation_id: int, remaining_pzt_id: str
+) -> ReleaseResult:
+    """CLAUDE.md step 12, "What happens to a confirmed partner": the one
+    manual escape given to the player left behind when their match's
+    partner deletes their CourtDuo account. "Do NOT cancel the match and
+    do NOT free the other player to invite somebody else automatically" --
+    this is the opt-in the player themselves must trigger instead, behind
+    its own two-step confirmation (bot.handlers.account_deletion).
+
+    Moves the invitation to CANCELLED -- the exact state a step 8.6
+    inviter-cancel leaves behind, so nothing else needs to change for
+    db.crud.get_matched_invitation to stop seeing it and for
+    `remaining_pzt_id` to be free to invite somebody else at this
+    tournament (CLAUDE.md: "Once released, they may invite someone else
+    for that tournament").
+    """
+    invitation = await crud.get_invitation_by_id(session, invitation_id)
+    if invitation is None:
+        return ReleaseResult(failure=ReleaseFailure.NOT_FOUND)
+    if remaining_pzt_id not in (invitation.inviter_pzt_id, invitation.invitee_pzt_id):
+        return ReleaseResult(failure=ReleaseFailure.NOT_YOURS)
+
+    current = await crud.lock_invitation(session, invitation_id)
+    if current is None:
+        return ReleaseResult(failure=ReleaseFailure.NOT_FOUND)
+    if current.state is not InvitationState.ACCEPTED:
+        return ReleaseResult(failure=ReleaseFailure.NOT_ACCEPTED, invitation=current)
+
+    partner_deleted = (
+        current.invitee_name_snapshot is not None
+        if current.inviter_pzt_id == remaining_pzt_id
+        else current.inviter_name_snapshot is not None
+    )
+    if not partner_deleted:
+        return ReleaseResult(failure=ReleaseFailure.PARTNER_NOT_DELETED, invitation=current)
+
+    current.state = InvitationState.CANCELLED
+    await session.flush()
+    logger.info("Invitation %s released by its remaining player after partner deletion", current.id)
+    return ReleaseResult(invitation=current)

@@ -43,10 +43,12 @@ import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from bot.account_deletion import purge_finished_tournament_snapshots
 from bot.notifications import push
 from db import crud
 from db.models import ScraperRun
@@ -324,7 +326,27 @@ async def _loop(bot: Bot, session_factory: async_sessionmaker) -> None:
             await check_all(bot, session_factory)
         except Exception:
             logger.exception("Staleness alarm loop iteration failed unexpectedly")
+        try:
+            await _purge_name_snapshots(session_factory)
+        except Exception:
+            logger.exception("Name snapshot purge failed unexpectedly")
         await asyncio.sleep(CHECK_INTERVAL_SECONDS)
+
+
+_WARSAW_TZ = ZoneInfo("Europe/Warsaw")
+
+
+async def _purge_name_snapshots(session_factory: async_sessionmaker) -> None:
+    """CLAUDE.md step 12: "Add this to the same periodic task that already
+    runs the staleness check -- one more query on the existing 6-hour
+    loop, not a new scheduler." Its own try/except in _loop, same as
+    check_all -- a purge failure must not take the staleness check (or the
+    loop itself) down with it.
+    """
+    today = datetime.now(timezone.utc).astimezone(_WARSAW_TZ).date()
+    async with session_factory() as session:
+        await purge_finished_tournament_snapshots(session, today)
+        await session.commit()
 
 
 _TASK_KEY = "staleness_task"

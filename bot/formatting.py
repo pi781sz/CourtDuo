@@ -26,3 +26,11 @@ STATUS_EMOJI: dict[InvitationState, str] = {
     InvitationState.REJECTED: "🔴",
     InvitationState.NOT_ATTENDING: "🔴",
 }
+
+# CLAUDE.md step 12, "What happens to a confirmed partner": an ACCEPTED
+# invitation whose other side deleted their CourtDuo account keeps its
+# match line, but with this colour instead of STATUS_EMOJI[ACCEPTED] --
+# "confirm this in person" is a different situation from a live match, not
+# a fifth InvitationState (CLAUDE.md forbids inventing states for what is
+# really a display concern -- see the NOT_ATTENDING precedent).
+PARTNER_DELETED_EMOJI = "⚠️"

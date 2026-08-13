@@ -51,6 +51,11 @@ class RegistrationOutcome(Enum):
     NOT_FOUND = auto()
     GENDER_CONFLICT = auto()
     ALREADY_BOUND_TO_OTHER = auto()
+    # CLAUDE.md step 12, "Blocking": "a blocked pzt_id cannot create an
+    # account. The refusal message must be plain and give no detail" --
+    # bot.handlers.start deliberately maps this to the exact same wording
+    # as NOT_FOUND, so a blocked child cannot tell the two apart.
+    BLOCKED = auto()
 
 
 @dataclass
@@ -81,6 +86,10 @@ async def register_by_pzt_id(session: AsyncSession, telegram_id: int, raw_pzt_id
     # players.pzt_id (and therefore accounts.pzt_id's FK) must match.
     canonical_pzt_id = rankings[0].player_pzt_id
 
+    if await crud.is_pzt_id_blocked(session, canonical_pzt_id):
+        logger.info("Registration refused: pzt_id blocked (telegram_id=%s)", telegram_id)
+        return RegistrationResult(RegistrationOutcome.BLOCKED)
+
     try:
         gender = derive_gender({r.ranking_list.code for r in rankings})
     except GenderConflictError:
@@ -103,5 +112,11 @@ async def register_by_pzt_id(session: AsyncSession, telegram_id: int, raw_pzt_id
     account = await crud.create_account(
         session, telegram_id=telegram_id, pzt_id=canonical_pzt_id, full_name=player.full_name, gender=gender
     )
+    # CLAUDE.md step 12: if this pzt_id had an earlier account that was
+    # deleted while it held a still-open invitation, that row may carry a
+    # stale name snapshot -- clear it now that the player is back, so Moje
+    # deble goes back to showing a live match (🟢) instead of "confirm in
+    # person" (⚠️). A no-op for the overwhelming majority of registrations.
+    await crud.clear_name_snapshots_for_pzt_id(session, canonical_pzt_id)
     logger.info("Registration succeeded (telegram_id=%s)", telegram_id)
     return RegistrationResult(RegistrationOutcome.SUCCESS, account=account)

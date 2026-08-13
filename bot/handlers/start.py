@@ -44,6 +44,10 @@ _FAILURE_MESSAGE_KEYS = {
     RegistrationOutcome.NOT_FOUND: "registration.not_found",
     RegistrationOutcome.GENDER_CONFLICT: "registration.error_try_later",
     RegistrationOutcome.ALREADY_BOUND_TO_OTHER: "registration.already_bound",
+    # CLAUDE.md step 12: deliberately the exact same wording as NOT_FOUND
+    # -- "give no detail" means a blocked child must not be able to tell a
+    # block apart from a mistyped id.
+    RegistrationOutcome.BLOCKED: "registration.not_found",
 }
 
 

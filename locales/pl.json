@@ -136,6 +136,7 @@
     "empty": "Nie masz jeszcze żadnych zaproszeń.",
     "not_registered": "Zacznij od komendy /start, aby się zarejestrować.",
     "matched": "{emoji} {name} — gracie razem",
+    "matched_partner_deleted": "{emoji} {name} — potwierdź osobiście",
     "sent_pending": "{emoji} {name} — wysłane",
     "sent_rejected": "{emoji} {name} — odmowa",
     "sent_not_attending": "{emoji} {name} — nie jedzie",
@@ -175,5 +176,42 @@
     },
     "choose_account_prompt": "Wybierz, czyje deble chcesz zobaczyć:",
     "readonly_heading": "Podgląd: {name}"
+  },
+  "deletion": {
+    "explain_heading": "Usunięcie konta CourtDuo",
+    "explain_intro": "Co się stanie:",
+    "explain_bullet_account": "• Twoje konto zostanie usunięte.",
+    "explain_bullet_invitations": "• Twoje oczekujące zaproszenia (wysłane i otrzymane) zostaną anulowane, a druga strona dostanie powiadomienie.",
+    "explain_bullet_matches": {
+      "M": "• Potwierdzone pary NIE zostaną anulowane. Partner dowie się o usunięciu konta i będzie mógł ręcznie zwolnić parę.",
+      "W": "• Potwierdzone pary NIE zostaną anulowane. Partnerka dowie się o usunięciu konta i będzie mogła ręcznie zwolnić parę."
+    },
+    "explain_bullet_viewers": "• Dostęp do podglądu Twojego konta zostanie usunięty.",
+    "explain_irreversible": "Tej operacji nie można cofnąć.",
+    "start_button": "Usuń konto",
+    "abort_button": "Anuluj",
+    "confirm_prompt": "Czy na pewno chcesz usunąć swoje konto CourtDuo?",
+    "confirm_button": "Tak, usuń konto",
+    "aborted": "Usuwanie konta anulowane.",
+    "done": "Twoje konto zostało usunięte.",
+    "partner_notified": {
+      "M": "{name} usunął swoje konto CourtDuo.\nSprawdź z nim osobiście, czy nadal gracie razem na tym turnieju.",
+      "W": "{name} usunęła swoje konto CourtDuo.\nSprawdź z nią osobiście, czy nadal gracie razem na tym turnieju."
+    },
+    "invitation_cancelled_by_deletion": {
+      "M": "{name} usunął swoje konto CourtDuo. Zaproszenie na {tournament} zostało anulowane.",
+      "W": "{name} usunęła swoje konto CourtDuo. Zaproszenie na {tournament} zostało anulowane."
+    },
+    "release_button": "Zwolnij parę",
+    "release_confirm_prompt": {
+      "M": "Czy na pewno chcesz zwolnić tę parę?\n\nUżyj tego tylko, jeśli naprawdę rozmawiałeś z tą osobą i wiecie, że już razem nie gracie. Tej operacji nie można cofnąć.",
+      "W": "Czy na pewno chcesz zwolnić tę parę?\n\nUżyj tego tylko, jeśli naprawdę rozmawiałaś z tą osobą i wiecie, że już razem nie gracie. Tej operacji nie można cofnąć."
+    },
+    "release_confirm_button": "Tak, zwolnij",
+    "release_aborted": "Zwolnienie pary anulowane.",
+    "release_done": {
+      "M": "Zwolniłeś parę na turnieju {tournament}. Możesz teraz zaprosić inną osobę.",
+      "W": "Zwolniłaś parę na turnieju {tournament}. Możesz teraz zaprosić inną osobę."
+    }
   }
 }

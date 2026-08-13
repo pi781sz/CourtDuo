@@ -97,6 +97,9 @@ router = Router(name="invitations")
 # 8.6, CHANGE 1).
 _SEND_FAILURE_KEYS: dict[SendFailure, str] = {
     SendFailure.NOT_ENTITLED: "partner_selection.cannot_send_invitation",
+    # CLAUDE.md step 12: deliberately the same neutral message as
+    # NOT_ENTITLED -- a blocked player is never told why.
+    SendFailure.BLOCKED: "partner_selection.cannot_send_invitation",
     SendFailure.SELF_INVITE: "partner_selection.self_invite",
     SendFailure.GENDER_MISMATCH: "partner_selection.gender_mismatch",
     SendFailure.INVITER_ALREADY_MATCHED: "partner_selection.inviter_already_matched",
@@ -122,6 +125,8 @@ _RESPOND_FAILURE_KEYS: dict[RespondFailure, str] = {
     # confirming that an invitation exists would be a disclosure of its own.
     RespondFailure.NOT_FOUND: "invitation.no_longer_valid",
     RespondFailure.NOT_YOURS: "invitation.no_longer_valid",
+    # CLAUDE.md step 12: same neutral wording -- no detail given.
+    RespondFailure.BLOCKED: "invitation.no_longer_valid",
     RespondFailure.PLAYER_ALREADY_MATCHED: "invitation.no_longer_valid",
     RespondFailure.ALREADY_ANSWERED: "invitation.already_answered",
     RespondFailure.CANCELLED_BY_MATCH: "invitation.partner_found_elsewhere",

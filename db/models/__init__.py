@@ -12,6 +12,7 @@ from .account_viewers import AccountViewer, ViewerInviteToken
 from .accounts import Account
 from .alarm_state import AlarmState
 from .base import Base
+from .blocked_pzt_ids import BlockedPztId
 from .enums import (
     AgeCategory,
     Gender,
@@ -39,6 +40,7 @@ __all__ = [
     "ViewerInviteToken",
     "ScraperRun",
     "AlarmState",
+    "BlockedPztId",
     "AgeCategory",
     "Gender",
     "InvitationState",

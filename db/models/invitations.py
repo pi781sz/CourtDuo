@@ -42,6 +42,22 @@ written, so there is a real player to key on even though there is no
 `accounts` row yet. When that pzt_id later registers, db.crud looks up
 every row here matching it and notifies each `inviter_pzt_id` still
 eligible to be told.
+
+`inviter_name_snapshot`/`invitee_name_snapshot` (CLAUDE.md step 12,
+"What is actually erased, and what is kept"): a copy of that side's
+`accounts.full_name`, written only when that side's account is deleted
+(bot.account_deletion.delete_account). `players.full_name` itself is never
+erased -- it is PZT's own public roster data, kept regardless of any
+CourtDuo account -- but Moje deble's *display* of a deleted player's name
+on a still-open invitation is deliberately not tied to that permanent
+roster copy: it reads the snapshot instead (bot.moje_deble), so the
+snapshot -- and only the snapshot -- can be purged once the tournament
+finishes (bot.account_deletion.purge_finished_tournament_snapshots, run
+off the same periodic loop as the staleness check). A snapshot is cleared
+if the same pzt_id ever registers again before that purge runs
+(db.crud.clear_name_snapshots_for_pzt_id, called from
+bot.registration.register_by_pzt_id) so a returning player's own match
+goes back to showing 🟢 normally instead of a stale "confirm in person".
 """
 
 from __future__ import annotations
@@ -92,6 +108,13 @@ class Invitation(TimestampMixin, Base):
     # edit -- the transaction re-check is what actually prevents an answer,
     # this is cosmetic only.
     invitee_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # CLAUDE.md step 12: set only when the corresponding side's account has
+    # been deleted -- see the module docstring. Null for the overwhelming
+    # majority of rows, whose accounts are alive and whose display always
+    # reads the live `players.full_name` join instead.
+    inviter_name_snapshot: Mapped[str | None] = mapped_column(String, nullable=True)
+    invitee_name_snapshot: Mapped[str | None] = mapped_column(String, nullable=True)
 
     inviter: Mapped["Player"] = relationship(foreign_keys=[inviter_pzt_id], back_populates="sent_invitations")
     invitee: Mapped["Player"] = relationship(foreign_keys=[invitee_pzt_id], back_populates="received_invitations")
