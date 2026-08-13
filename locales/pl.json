@@ -195,8 +195,8 @@
     "aborted": "Usuwanie konta anulowane.",
     "done": "Twoje konto zostało usunięte.",
     "partner_notified": {
-      "M": "{name} usunął swoje konto CourtDuo.\nPotwierdź z nim osobiście, czy nadal gracie razem na tym turnieju.",
-      "W": "{name} usunęła swoje konto CourtDuo.\nPotwierdź z nią osobiście, czy nadal gracie razem na tym turnieju."
+      "M": "{name} usunął swoje konto CourtDuo.\nPotwierdź z nim osobiście, czy nadal gracie razem.",
+      "W": "{name} usunęła swoje konto CourtDuo.\nPotwierdź z nią osobiście, czy nadal gracie razem."
     },
     "invitation_cancelled_by_deletion": {
       "M": "{name} usunął swoje konto CourtDuo. Zaproszenie na {tournament} zostało anulowane.",

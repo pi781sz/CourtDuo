@@ -42,7 +42,6 @@ from bot.i18n import all_translations, t
 from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard
 from bot.keyboards.navigation import (
     MojeDebleCallback,
-    find_partner_keyboard,
     moje_deble_summary_keyboard,
     persistent_menu_keyboard,
 )
@@ -77,21 +76,22 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     groups = group_by_tournament(invitations, account.pzt_id, _warsaw_today(), lang)
 
     if not groups:
-        # CLAUDE.md, "EMPTY STATE": "say so plainly and offer 'Znajdź
-        # partnera'." Not "Moje deble" too -- that button would point back
-        # at this same empty screen.
-        await message.answer(t("moje_deble.empty", lang), reply_markup=find_partner_keyboard(lang))
+        # CLAUDE.md, "EMPTY STATE": "say so plainly." Step 12.2 removed
+        # the inline "Znajdź partnera" button this used to carry -- it
+        # duplicated the persistent reply keyboard's own label, already
+        # visible below the input box. No reply_markup at all.
+        await message.answer(t("moje_deble.empty", lang))
         return
 
-    # CLAUDE.md step 8.1: "The summary list message itself gets [Znajdź
-    # partnera]." Not [Moje deble] too, for the same reason as the empty
-    # state -- it would only point back at the screen the player is
-    # already looking at. Step 8.3, PROBLEM 6: a heading as the first line,
-    # so a player scrolling back through the chat knows what this message is.
+    # Step 8.3, PROBLEM 6: a heading as the first line, so a player
+    # scrolling back through the chat knows what this message is.
     # Step 12.1, PROBLEM 4: a stranded match's own "Usuń" button rides
     # along on this same keyboard -- its status line is already in `body`,
     # so it must not be repeated in a follow-up message just to have
-    # somewhere to hang the button.
+    # somewhere to hang the button. Step 12.2: no "Znajdź partnera" button
+    # here any more either, for the same reason as the empty state above --
+    # moje_deble_summary_keyboard returns None when there is nothing
+    # stranded to act on.
     heading = t("moje_deble.heading", lang)
     body = render_groups(groups, lang)
     release_ids = [entry.invitation_id for entry in partner_deleted_entries(groups)]

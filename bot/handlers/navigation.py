@@ -1,11 +1,18 @@
-""""Znajdź partnera": the inline button category_keyboard carries, and the
-persistent-reply-keyboard label of the same name (CLAUDE.md step 8.4).
-Both re-enter tournament search at the age-category screen -- exactly what
-a fresh `/start` does for an already-registered player.
+""""Znajdź partnera": the persistent-reply-keyboard label (CLAUDE.md step
+8.4) and, until step 12.2, an inline button Moje deble's own summary/empty
+screens also carried. Both re-enter tournament search at the age-category
+screen -- exactly what a fresh `/start` does for an already-registered
+player.
 
 Neither carries a state filter: the tap can follow a pushed notification,
 or arrive while the player is mid another flow entirely, so the player may
 be in any state, or none at all, when it happens.
+
+Step 12.2 removed the inline button (bot.keyboards.navigation, module
+docstring: it duplicated the persistent keyboard's own label). The
+callback handler below stays regardless -- a message sent before that
+change, still carrying the old button, must keep working when tapped --
+but no keyboard in this codebase builds one any more.
 """
 
 from __future__ import annotations

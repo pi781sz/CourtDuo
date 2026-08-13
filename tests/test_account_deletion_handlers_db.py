@@ -177,7 +177,7 @@ async def test_delete_account_confirm_notifies_partner_and_pending_counterpartie
     pushed = _pushes(bot)
     # Jagoda (confirmed partner) is told to confirm in person.
     assert pushed[8111] == [
-        "Anna Testowa usunęła swoje konto CourtDuo.\nPotwierdź z nią osobiście, czy nadal gracie razem na tym turnieju."
+        "Anna Testowa usunęła swoje konto CourtDuo.\nPotwierdź z nią osobiście, czy nadal gracie razem."
     ]
     # Ola (still-pending invitee) is told her invitation was cancelled.
     assert pushed[8112] == ["Anna Testowa usunęła swoje konto CourtDuo. Zaproszenie na WTK Testowo - 22.08.2026 zostało anulowane."]

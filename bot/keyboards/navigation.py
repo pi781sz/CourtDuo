@@ -15,12 +15,21 @@ plausibly start from, not only /start's own greeting -- see CLAUDE.md,
 already need an inline keyboard of their own are skipped (Telegram allows
 only one `reply_markup` per message).
 
-find_partner_keyboard is the one exception, kept for bot.handlers.moje_deble:
-its own summary/empty state still needs a single "Znajdź partnera" button
-rather than "Moje deble" too, since tapping "Moje deble" there would just
-point back at the screen already on screen.
+Step 12.2 removed the one exception this module used to carry:
+find_partner_keyboard put an inline "Znajdź partnera" button on Moje
+deble's own summary/empty screens, and moje_deble_summary_keyboard put the
+same button on the non-empty summary -- both duplicated the persistent
+reply keyboard's own label, which live testing found sitting directly
+underneath it on screen at the same time. Neither function offers that
+button any more; bot.handlers.moje_deble sends no inline keyboard at all
+for the empty state, and moje_deble_summary_keyboard now carries only
+buttons that act on a specific entry (one "Usuń" per stranded match).
+FindPartnerCallback itself stays defined and handled
+(bot.handlers.navigation.handle_find_partner) purely so a message sent
+before this change, still carrying the old button, keeps working when
+tapped -- no keyboard in this codebase emits it any more.
 
-invitation_sent_keyboard (step 8.7) is a second, narrower exception: the
+invitation_sent_keyboard (step 8.7) is the one exception that remains: the
 persistent reply keyboard can be collapsed by the player, and Telegram
 remembers that per chat regardless of is_persistent, so it cannot be the
 only way back to Moje deble. The one screen a player has just acted on and
@@ -62,26 +71,25 @@ class MojeDebleCallback(CallbackData, prefix="mdeble"):
     pass
 
 
-def find_partner_keyboard(lang: str) -> InlineKeyboardMarkup:
-    builder = InlineKeyboardBuilder()
-    builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
-    builder.adjust(1)
-    return builder.as_markup()
-
-
-def moje_deble_summary_keyboard(lang: str, release_invitation_ids: list[int] | None = None) -> InlineKeyboardMarkup:
-    """CLAUDE.md step 12.1, PROBLEM 4: the non-empty Moje deble summary's
-    own keyboard -- "Znajdź partnera" plus one "Usuń" button per stranded
-    match (a confirmed pairing whose partner deleted their CourtDuo
-    account), reusing ReleaseMatchCallback unchanged. Replaces the earlier
-    design, which repeated the stranded match's own status line in a
-    second, separate message purely to have somewhere to hang a button --
-    the summary message already carries that line, so the button belongs
-    on the summary's own keyboard instead.
+def moje_deble_summary_keyboard(
+    lang: str, release_invitation_ids: list[int] | None = None
+) -> InlineKeyboardMarkup | None:
+    """CLAUDE.md step 12.1, PROBLEM 4, pared back by step 12.2: one "Usuń"
+    button per stranded match (a confirmed pairing whose partner deleted
+    their CourtDuo account), reusing ReleaseMatchCallback unchanged. Step
+    12.1's own version also carried a "Znajdź partnera" button; step 12.2
+    removed it -- it duplicated the persistent reply keyboard's own label,
+    visible on screen at the same time as this one. Navigation lives on
+    the persistent keyboard only; an inline keyboard here carries nothing
+    but buttons that act on this message's own specific entries. Returns
+    None -- "no inline keyboard" -- when there is nothing stranded to
+    act on.
     """
+    release_ids = list(release_invitation_ids or ())
+    if not release_ids:
+        return None
     builder = InlineKeyboardBuilder()
-    builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
-    for invitation_id in release_invitation_ids or ():
+    for invitation_id in release_ids:
         builder.button(
             text=t("deletion.release_button", lang),
             callback_data=ReleaseMatchCallback(invitation_id=invitation_id),
