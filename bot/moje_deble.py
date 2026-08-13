@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from enum import Enum, auto
 
-from bot.formatting import STATUS_EMOJI
+from bot.formatting import PARTNER_DELETED_EMOJI, STATUS_EMOJI
 from bot.i18n import t
 from bot.tournament_search import label_for_tournament
 from core.text import display_name
@@ -61,6 +61,14 @@ class DebelEntry:
     other_pzt_id: str
     other_full_name: str
     updated_at: datetime
+    # CLAUDE.md step 12: true when this ACCEPTED invitation's other side
+    # deleted their CourtDuo account -- other_full_name is then the
+    # snapshot taken at deletion time (Invitation.inviter_name_snapshot /
+    # invitee_name_snapshot), not a live `players.full_name` join. Always
+    # False for every other state -- the deletion engine only ever leaves
+    # a snapshot behind on a still-ACCEPTED row (CLAUDE.md: "CONFIRMED
+    # matches are NOT cancelled").
+    partner_account_deleted: bool = False
 
 
 def tournament_finished(date_from: date | None, date_to: date | None, today: date) -> bool:
@@ -90,11 +98,13 @@ def entry_from_invitation(invitation: Invitation, viewer_pzt_id: str) -> DebelEn
     if invitation.inviter_pzt_id == viewer_pzt_id:
         direction = Direction.SENT
         other_pzt_id = invitation.invitee_pzt_id
-        other_full_name = invitation.invitee.full_name
+        other_full_name = invitation.invitee_name_snapshot or invitation.invitee.full_name
+        partner_account_deleted = invitation.invitee_name_snapshot is not None
     else:
         direction = Direction.RECEIVED
         other_pzt_id = invitation.inviter_pzt_id
-        other_full_name = invitation.inviter.full_name
+        other_full_name = invitation.inviter_name_snapshot or invitation.inviter.full_name
+        partner_account_deleted = invitation.inviter_name_snapshot is not None
     return DebelEntry(
         invitation_id=invitation.id,
         tournament_guid=invitation.tournament_guid,
@@ -103,6 +113,7 @@ def entry_from_invitation(invitation: Invitation, viewer_pzt_id: str) -> DebelEn
         other_pzt_id=other_pzt_id,
         other_full_name=other_full_name,
         updated_at=invitation.updated_at,
+        partner_account_deleted=partner_account_deleted,
     )
 
 
@@ -224,10 +235,14 @@ def entry_line(entry: DebelEntry, lang: str) -> str:
     od:"), so a sent and a received line never read the same way.
     """
     name = display_name(entry.other_full_name)
-    emoji = STATUS_EMOJI[entry.state]
     if entry.state is InvitationState.ACCEPTED:
-        return t("moje_deble.matched", lang, emoji=emoji, name=name)
-    return t(_ENTRY_TEXT_KEYS[(entry.direction, entry.state)], lang, emoji=emoji, name=name)
+        if entry.partner_account_deleted:
+            # CLAUDE.md step 12: "the match line keeps its name but with a
+            # distinct status meaning 'confirm this in person'" -- same
+            # match, different colour and wording, not a fifth state.
+            return t("moje_deble.matched_partner_deleted", lang, emoji=PARTNER_DELETED_EMOJI, name=name)
+        return t("moje_deble.matched", lang, emoji=STATUS_EMOJI[entry.state], name=name)
+    return t(_ENTRY_TEXT_KEYS[(entry.direction, entry.state)], lang, emoji=STATUS_EMOJI[entry.state], name=name)
 
 
 def render_groups(groups: list[TournamentGroup], lang: str) -> str:
@@ -261,4 +276,18 @@ def pending_sent_entries(groups: list[TournamentGroup]) -> list[DebelEntry]:
         for group in groups
         for entry in group.entries
         if entry.state is InvitationState.PENDING and entry.direction is Direction.SENT
+    ]
+
+
+def partner_deleted_entries(groups: list[TournamentGroup]) -> list[DebelEntry]:
+    """Every match whose partner has deleted their account, across all
+    groups, in render order -- what the "Zwolnij parę" button
+    (CLAUDE.md step 12, "What happens to a confirmed partner") attaches
+    to. Direction is irrelevant here (a match is symmetric), unlike
+    pending_received_entries/pending_sent_entries."""
+    return [
+        entry
+        for group in groups
+        for entry in group.entries
+        if entry.state is InvitationState.ACCEPTED and entry.partner_account_deleted
     ]

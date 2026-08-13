@@ -1,3 +1,4 @@
+from .account_deletion import router as account_deletion_router
 from .invitations import router as invitations_router
 from .invite_friend import router as invite_friend_router
 from .moje_deble import router as moje_deble_router
@@ -20,4 +21,5 @@ __all__ = [
     "invite_friend_router",
     "pending_external_invites_router",
     "viewers_router",
+    "account_deletion_router",
 ]

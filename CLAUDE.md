@@ -298,7 +298,7 @@ The part most likely to break. Be careful.
 - A player may have up to **3 pending outgoing invitations** per tournament.
 - **First accept wins.** On acceptance, all other pending invitations for **both** players at that tournament are cancelled. Each cancelled recipient is told: *"Ten zawodnik znalazł już partnera."*
 - **Atomic locking is mandatory.** The accept transaction must `SELECT … FOR UPDATE` the relevant invitation rows, re-verify neither player is already matched at that tournament, then commit. Without this you will eventually double-book someone.
-- **A confirmed match is locked.** Neither side can cancel or change partner. Both are warned of this *before* confirming — the inviter on the confirmation screen, the invitee in the invitation itself. This still holds after step 8.6: cancellation only ever reaches a PENDING invitation, never an ACCEPTED one — `bot.invitation_engine.cancel_invitation` re-verifies the state inside its own lock and refuses (reporting the real outcome instead) if the invitee accepted a moment before the cancel transaction started.
+- **A confirmed match is locked.** Neither side can cancel or change partner. Both are warned of this *before* confirming — the inviter on the confirmation screen, the invitee in the invitation itself. This still holds after step 8.6: cancellation only ever reaches a PENDING invitation, never an ACCEPTED one — `bot.invitation_engine.cancel_invitation` re-verifies the state inside its own lock and refuses (reporting the real outcome instead) if the invitee accepted a moment before the cancel transaction started. **The one exception (step 12):** when a player deletes their own CourtDuo account, their confirmed matches are deliberately *not* cancelled by that deletion — but the player left behind may release the pairing themselves, manually, once they've actually confirmed in person that they're no longer playing together. See "Account deletion and blocking" below for why this doesn't weaken the rule: it exists to stop one party unilaterally walking away from a commitment, and that reasoning doesn't hold once one party no longer exists in the system to walk away from anything.
 - **A PENDING invitation may be withdrawn by its own sender (step 8.6).** Only the inviter, and only while it is still PENDING — the invitee answers, they do not cancel, and gets no cancel button of their own. Re-verified inside the cancel transaction's own single-row lock (the same shape as Odrzuć/"Nie jadę na ten turniej"), since the invitee may answer it a moment before the cancel lands; if that happens the inviter is told what the answer was instead of a silent no-op. The invitee is notified (`<Imię Nazwisko> wycofał/wycofała zaproszenie — <tournament>`, gendered on the *inviter*), and if their original invitation message is still editable, its three answer buttons are stripped via `edit_message_reply_markup` — best-effort only, since Telegram refuses to edit messages past a certain age; the transaction's own re-check is what actually prevents a stale answer, not the edit. A cancelled invitation frees the slot it held: it no longer counts toward the inviter's 3-pending limit, and — unlike REJECTED or NOT_ATTENDING — does **not** block the inviter from re-inviting the same person for the same tournament, since a cancellation is the inviter's own change of mind rather than the other player's decision (see "Pre-invitation checks", the re-invite block). Cancelled invitations stay hidden from Moje deble, same as any other CANCELLED row.
 - Invitations expire at **10:00 Europe/Warsaw on the tournament start date**, computed via `zoneinfo` and stored as UTC. Poland is UTC+2 in summer, UTC+1 in winter — never hardcode an offset.
 - Rejection is instant and free. The inviter may immediately invite someone else — someone **else**, not the same person again for the same tournament (see "Pre-invitation checks", the re-invite block).
@@ -376,6 +376,75 @@ Both directions are shown — invitations this player sent and ones they receive
 `/start` must never be the only way forward — it isn't: `Znajdź partnera` on the persistent keyboard returns the player straight to the age-category screen from anywhere.
 
 `tests/test_no_dead_ends.py` checks mechanically that none of the old inline-`[Menu]` machinery (`MenuCallback`, `terminal_keyboard`, `menu_keyboard`, the literal "🔵 Menu" button text) has crept back in anywhere under `bot/`. Actual button contents on any given message are covered by the handler-level tests in `tests/test_*_db.py` and the keyboard-builder tests in `tests/test_*_keyboards.py`, which assert what a real handler call or keyboard builder actually produces.
+
+---
+
+## Account deletion and blocking
+
+Deleting an account alone is not enough — a deleted player could re-register in seconds with the same PZT id, so blocking is a second, deliberately separate mechanism. GDPR erasure has to be possible, and the data involved is children's names.
+
+### Self-service deletion
+
+A player deletes their own account from inside the bot — `/usun_konto`. This must not depend on an operator being awake, so there is no operator-only path for the normal case (see "Blocking" below for the one thing that genuinely does require a human at psql).
+
+Two-step confirmation, both screens inline-keyboard only (rule 1): the first states plainly what is about to happen — the account goes, pending invitations sent and received are cancelled and the other side told, confirmed matches are **not** cancelled, viewer access granted from this account is revoked — and ends with "Tej operacji nie można cofnąć." Only the second screen's tap actually deletes anything.
+
+On deletion:
+
+- The `accounts` row is deleted, along with every `account_viewers` grant and `viewer_invite_tokens` row for it (both carry `ON DELETE CASCADE` foreign keys to `accounts.id`, so this is automatic).
+- Every PENDING invitation this account **sent** is cancelled; each invitee is told, in the same wording regardless of direction: *"{Imię Nazwisko} usunął/usunęła swoje konto CourtDuo. Zaproszenie na {turniej} zostało anulowane."*
+- Every PENDING invitation this account **received** gets the identical treatment, symmetrically — the inviter is told the same way.
+- Every **CONFIRMED** (ACCEPTED) match is left exactly as it was — see below.
+- Every `pending_external_invites` row where this account was the **inviter** (their own "invite a non-user" attempts) is deleted. A row where this pzt_id is instead the *invitee* — someone else's still-open attempt to invite them — is not this player's own data and is left alone.
+- The `players` row (name, club, ranking history — scraped from PZT's own public pages) is **never** touched. It isn't CourtDuo's data to erase; it's public roster data that exists independently of whether this pzt_id ever had a CourtDuo account, and the scraper will simply re-write it again on its next run regardless.
+
+### What happens to a confirmed partner
+
+This is the part that touches a real family, so it gets its own careful treatment, not a side effect of the deletion above.
+
+The remaining player is told:
+
+> *{Imię Nazwisko} usunął/usunęła swoje konto CourtDuo.*
+> *Sprawdź z nim/z nią osobiście, czy nadal gracie razem na tym turnieju.*
+
+— gendered on the *deleted* player's own gender (usunął/usunęła), which is the one thing the remaining player is entitled to be told about them.
+
+The match's `Invitation` row is **not** cancelled, and the remaining player is **not** automatically freed to invite somebody else. Deleting a CourtDuo account is not the same as withdrawing from the tournament — the deleted player may well still be playing, having simply stopped using the bot, and if CourtDuo silently released the pairing and the remaining player found a new partner, the deleted player could show up at the tournament expecting their original one. The bot has no way to know which is true, so it says so and lets the human decide.
+
+In Moje deble, that tournament keeps its match line, but with a distinct status instead of 🟢 — same emoji-driven convention as everything else in that view (see "Status display"):
+
+> ⚠️ *Jagoda Szewczyk — potwierdź osobiście*
+
+The remaining player gets exactly one manual escape: a "Zwolnij parę" button on that entry, behind its own two-step confirmation warning that this cannot be undone and should only be used after actually speaking to the other person. Tapping through moves the invitation to `CANCELLED` — the same state a normal step 8.6 inviter-cancel leaves behind, so nothing else needs to change for the tournament to count as free again and for the remaining player to invite someone else there.
+
+This is the single, explicitly documented exception to "Invitation engine"'s "a confirmed match is locked" rule. That rule exists to stop one party unilaterally walking away from a commitment the other side is relying on; it does not hold once one party has actually left the system, which is exactly the situation account deletion creates and exactly why the escape is manual, gated on the deletion having genuinely happened (`bot.invitation_engine.release_deleted_partner_match` re-verifies the other side's account is actually gone before allowing it), and available only to the player left behind — never to the one who deleted their own account, and never automatically.
+
+### What is actually erased, and what is kept — and why
+
+Erased outright: `telegram_id`, the account's own copy of `full_name`/`gender`/`pzt_id` (all of it, by deleting the `accounts` row itself), every viewer grant and invite token, and every `pending_external_invites` row this player was the inviter of.
+
+Kept, deliberately: `Invitation` rows for tournaments that have not yet finished, carrying a **name snapshot** of the deleted player (`invitations.inviter_name_snapshot` / `invitee_name_snapshot`) taken at the moment of deletion. The other child in a confirmed match made a real commitment and needs to know who they're paired with — a "potwierdź osobiście" line with no name attached is useless to them, and CourtDuo already has a permanent, independent copy of that name sitting in `players.full_name` (PZT's own roster, never erased — see above) that Moje deble could have kept reading forever. It deliberately does not: the snapshot exists specifically so that *this* trace — "CourtDuo once told this specific other child which specific player they were paired with" — has a bounded lifetime of its own, decoupled from `players`, rather than living as long as PZT happens to keep scraping that name. `bot.moje_deble` reads the snapshot in preference to the live `players` join whenever one is present; `bot.registration.register_by_pzt_id` clears any snapshot for a pzt_id that registers again before it's purged, so a player who comes back sees a normal 🟢 match again rather than a stale warning.
+
+Snapshots are purged — set back to `NULL` — once the tournament they belong to has finished (same "finished" definition Moje deble already uses: `date_to` where present, otherwise `date_from`, over at the end of that Europe/Warsaw day). This runs off the same 6-hour periodic loop the staleness check already uses (`bot.staleness`), not a scheduler of its own — one more query per tick, not a new moving part.
+
+*A note on the reasoning above: this is a considered decision with a stated rationale, not a legal ruling. Neither the author of this document nor the person implementing it is a lawyer.*
+
+### Blocking
+
+A separate mechanism from deletion, on purpose — blocking must survive the very deletion above, and a deleted account's row is gone the moment that happens. A standalone table:
+
+```
+blocked_pzt_ids
+  pzt_id      text primary key
+  blocked_at  timestamptz not null
+  reason      text null
+```
+
+Checked at registration (`bot.registration.register_by_pzt_id`): a blocked pzt_id cannot create an account. The refusal is deliberately worded identically to "pzt_id not found" (`registration.not_found`) — a blocked child must not be able to tell a block apart from a typo, so there is nothing to interrogate the bot about.
+
+Also checked on every invitation **send** and **accept** (`bot.invitation_engine.send_invitation` / `accept_invitation`), on both participants, so a block takes effect immediately for a pzt_id that already has an account — not only at its next registration attempt, which might never come. Both failures are mapped to the same neutral, already-existing wording the app uses for unrelated refusals (`partner_selection.cannot_send_invitation`, `invitation.no_longer_valid`) — never a message that reveals a block happened.
+
+**No admin path in the bot. No Telegram command, for anyone, ever.** Writing or removing a row in `blocked_pzt_ids` is done in `psql`, deliberately, by a human at a keyboard — see `docs/RUNBOOK.md`. One compromised operator Telegram account must never be able to block or unblock anyone.
 
 ---
 
@@ -496,10 +565,13 @@ The alarm's message text is operator-facing English, hardcoded in `bot.staleness
 
 ## Build order
 
-All ten steps are built, merged, deployed and tested end-to-end against live PZT
+Twelve steps are built, merged, deployed and tested end-to-end against live PZT
 data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.7, 10.1–10.2) were
 corrections and refinements found by live testing; their behaviour is documented
-in the relevant sections above, which are the authoritative description.
+in the relevant sections above, which are the authoritative description. Steps
+11 and 12 were added after the original ten, once real users became imminent
+rather than being part of the initial plan — see "Operations" and "Account
+deletion and blocking" for their authoritative descriptions.
 
 1. ~~Tournament scraper with doubles detection~~ **done**
 2. ~~Ranking scraper, alphabetical lists~~ **done**
@@ -511,6 +583,8 @@ in the relevant sections above, which are the authoritative description.
 8. ~~Status view and notifications — "Moje deble"~~ **done**
 9. ~~Non-user invite flow and the "they joined" callback~~ **done** (incl. the inviter referrer token, recorded but never displayed)
 10. ~~Read-only viewers (allowlisted test feature)~~ **done**
+11. ~~Staleness alarm and `/status`~~ **done**
+12. ~~Account deletion and blocking~~ **done**
 
 ## Not yet built
 
@@ -518,10 +592,6 @@ Not part of the original build order, but required before real users:
 
 - **Scrapers on systemd timers** rather than GitHub Actions cron, with a
   `workflow_dispatch`-only workflow kept as a manual fallback.
-- **Account deletion and blocking.** Deleting alone is not enough — a deleted
-  player can re-register in seconds, so blocking needs its own persistent flag.
-  Deletion must also answer what happens to a partner whose confirmed match is
-  removed. Required for GDPR erasure; the data is children's names.
 - **Results-confirmed verification.** Scrape `TournamentResults.aspx` after
   tournaments end and check whether a matched pair actually appears in the
   doubles draw. Collect the data before showing any badge.

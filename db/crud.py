@@ -27,7 +27,7 @@ import hashlib
 import logging
 from datetime import date, datetime, timedelta
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -41,6 +41,7 @@ from .models import (
     AccountViewer,
     AgeCategory,
     AlarmState,
+    BlockedPztId,
     Event,
     Gender,
     Invitation,
@@ -922,6 +923,98 @@ async def revoke_viewer(session: AsyncSession, account_id: int, viewer_id: int, 
     row.revoked_at = now
     await session.flush()
     return row
+
+
+# --- Account deletion and blocking (CLAUDE.md step 12) -----------------------
+
+
+async def is_pzt_id_blocked(session: AsyncSession, pzt_id: str) -> bool:
+    """CLAUDE.md step 12, "Blocking": checked at registration and on every
+    invitation send/accept, so a block takes effect immediately for
+    someone already registered rather than only at the next registration
+    attempt. `blocked_pzt_ids` is written only by a human at psql (see
+    docs/RUNBOOK.md) -- there is no code path anywhere that writes to it.
+    """
+    result = await session.execute(select(BlockedPztId.pzt_id).where(BlockedPztId.pzt_id == pzt_id))
+    return result.scalar_one_or_none() is not None
+
+
+async def clear_name_snapshots_for_pzt_id(session: AsyncSession, pzt_id: str) -> None:
+    """If `pzt_id` registers again after an earlier account of theirs was
+    deleted, any name snapshot bot.account_deletion.delete_account left on
+    their side of an invitation is stale -- they are back, so Moje deble
+    should go back to showing the live match (🟢) instead of "confirm in
+    person" (⚠️). Called from bot.registration.register_by_pzt_id right
+    after a fresh account is created. A no-op for the overwhelming
+    majority of registrations, which never had a snapshot to begin with.
+    """
+    result = await session.execute(
+        select(Invitation).where(
+            or_(
+                (Invitation.inviter_pzt_id == pzt_id) & Invitation.inviter_name_snapshot.is_not(None),
+                (Invitation.invitee_pzt_id == pzt_id) & Invitation.invitee_name_snapshot.is_not(None),
+            )
+        )
+    )
+    for invitation in result.scalars().all():
+        if invitation.inviter_pzt_id == pzt_id:
+            invitation.inviter_name_snapshot = None
+        if invitation.invitee_pzt_id == pzt_id:
+            invitation.invitee_name_snapshot = None
+    await session.flush()
+
+
+async def purge_finished_tournament_name_snapshots(session: AsyncSession, today: date) -> int:
+    """CLAUDE.md step 12, "What is actually erased, and what is kept":
+    "Purge those snapshots once the tournament has finished." A tournament
+    is finished the same way bot.moje_deble.tournament_finished defines it
+    -- `date_to` where present, otherwise `date_from`, over at the end of
+    that Europe/Warsaw day -- reimplemented here as a SQL predicate rather
+    than imported, since this runs as one bulk UPDATE rather than a
+    row-by-row Python loop. Returns the number of invitation rows touched,
+    for the caller to log.
+
+    Run off the same 6-hour periodic loop as the staleness check
+    (bot.staleness) rather than a scheduler of its own -- see
+    bot.account_deletion.purge_finished_tournament_snapshots.
+    """
+    finished_guid = (
+        select(Tournament.guid).where(func.coalesce(Tournament.date_to, Tournament.date_from) < today).scalar_subquery()
+    )
+    stmt = (
+        update(Invitation)
+        .where(
+            Invitation.tournament_guid.in_(finished_guid),
+            or_(Invitation.inviter_name_snapshot.is_not(None), Invitation.invitee_name_snapshot.is_not(None)),
+        )
+        .values(inviter_name_snapshot=None, invitee_name_snapshot=None)
+    )
+    result = await session.execute(stmt)
+    return result.rowcount or 0
+
+
+async def delete_pending_external_invites_by_inviter(session: AsyncSession, inviter_pzt_id: str) -> None:
+    """CLAUDE.md step 12, "What is actually erased": every still-open
+    "invite a non-user" attempt `inviter_pzt_id` made themselves -- their
+    own referral, not anyone else's. A row where `inviter_pzt_id` is the
+    *invitee* named by somebody else is not this player's own data to
+    erase and is left alone.
+    """
+    await session.execute(delete(PendingExternalInvite).where(PendingExternalInvite.inviter_pzt_id == inviter_pzt_id))
+
+
+async def delete_account(session: AsyncSession, account: Account) -> None:
+    """The one DELETE that removes an `accounts` row (CLAUDE.md step 12,
+    "Self-service deletion": "the account row and its viewers go").
+    `account_viewers` and `viewer_invite_tokens` both carry
+    `ondelete="CASCADE"` foreign keys to `accounts.id`, so Postgres removes
+    them itself -- nothing else needs deleting for those two tables. The
+    `players` row (and therefore every invitation's FK to it) is untouched:
+    it is PZT's own public roster data, not something a CourtDuo account
+    deletion erases -- see db.models.invitations' module docstring.
+    """
+    await session.delete(account)
+    await session.flush()
 
 
 # --- Staleness alarm (CLAUDE.md "Operations") --------------------------------

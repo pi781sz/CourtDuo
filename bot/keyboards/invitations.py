@@ -52,6 +52,23 @@ class CancelInvitationCallback(CallbackData, prefix="iwdrw"):
     invitation_id: int
 
 
+# CLAUDE.md step 12, "What happens to a confirmed partner": the manual
+# escape given to the player left behind when their match's partner
+# deletes their CourtDuo account. Two-step, like account deletion itself
+# -- ReleaseMatchCallback shows the warning, ReleaseMatchConfirmCallback is
+# the only one of the three that actually touches the row.
+class ReleaseMatchCallback(CallbackData, prefix="irlse"):
+    invitation_id: int
+
+
+class ReleaseMatchConfirmCallback(CallbackData, prefix="irlsy"):
+    invitation_id: int
+
+
+class ReleaseMatchAbortCallback(CallbackData, prefix="irlsn"):
+    invitation_id: int
+
+
 def confirm_send_keyboard(lang: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=t("invitation.confirm_send_button", lang), callback_data=ConfirmSendCallback())
@@ -91,6 +108,34 @@ def cancel_invitation_keyboard(invitation_id: int, lang: str) -> InlineKeyboardM
     builder.button(
         text=t("invitation.cancel_button", lang),
         callback_data=CancelInvitationCallback(invitation_id=invitation_id),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def release_match_keyboard(invitation_id: int, lang: str) -> InlineKeyboardMarkup:
+    """CLAUDE.md step 12: one button, on the remaining player's own
+    "confirm in person" match line in Moje deble -- step one of two."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=t("deletion.release_button", lang),
+        callback_data=ReleaseMatchCallback(invitation_id=invitation_id),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def release_match_confirm_keyboard(invitation_id: int, lang: str) -> InlineKeyboardMarkup:
+    """CLAUDE.md step 12: "a confirmation that says clearly this cannot be
+    undone" -- step two, the only tap that actually releases the pairing."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text=t("deletion.release_confirm_button", lang),
+        callback_data=ReleaseMatchConfirmCallback(invitation_id=invitation_id),
+    )
+    builder.button(
+        text=t("deletion.abort_button", lang),
+        callback_data=ReleaseMatchAbortCallback(invitation_id=invitation_id),
     )
     builder.adjust(1)
     return builder.as_markup()

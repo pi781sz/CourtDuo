@@ -220,6 +220,12 @@ The same list can run `/status` against the bot at any time for a plain-text sna
 
 ---
 
+## Account deletion and blocking
+
+Players delete their own account from inside the bot (`/usun_konto`) — nothing to set up. Blocking a PZT id (so it can't register or use invitations again, even if it already has an account) is operator-only and deliberately has no bot command at all: it's done directly in `psql`. See **`docs/RUNBOOK.md`** for the copy-pasteable SQL — blocking, unblocking, deleting an account on a player's behalf when they can't do it themselves, and answering a subject access request.
+
+---
+
 ## Tests
 
 ```bash
