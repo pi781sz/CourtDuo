@@ -51,6 +51,7 @@ from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from bot.i18n import t
+from bot.keyboards.invitations import ReleaseMatchCallback
 
 
 class FindPartnerCallback(CallbackData, prefix="fpart"):
@@ -64,6 +65,27 @@ class MojeDebleCallback(CallbackData, prefix="mdeble"):
 def find_partner_keyboard(lang: str) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def moje_deble_summary_keyboard(lang: str, release_invitation_ids: list[int] | None = None) -> InlineKeyboardMarkup:
+    """CLAUDE.md step 12.1, PROBLEM 4: the non-empty Moje deble summary's
+    own keyboard -- "Znajdź partnera" plus one "Usuń" button per stranded
+    match (a confirmed pairing whose partner deleted their CourtDuo
+    account), reusing ReleaseMatchCallback unchanged. Replaces the earlier
+    design, which repeated the stranded match's own status line in a
+    second, separate message purely to have somewhere to hang a button --
+    the summary message already carries that line, so the button belongs
+    on the summary's own keyboard instead.
+    """
+    builder = InlineKeyboardBuilder()
+    builder.button(text=t("common.find_partner_button", lang), callback_data=FindPartnerCallback())
+    for invitation_id in release_invitation_ids or ():
+        builder.button(
+            text=t("deletion.release_button", lang),
+            callback_data=ReleaseMatchCallback(invitation_id=invitation_id),
+        )
     builder.adjust(1)
     return builder.as_markup()
 

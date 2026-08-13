@@ -113,18 +113,6 @@ def cancel_invitation_keyboard(invitation_id: int, lang: str) -> InlineKeyboardM
     return builder.as_markup()
 
 
-def release_match_keyboard(invitation_id: int, lang: str) -> InlineKeyboardMarkup:
-    """CLAUDE.md step 12: one button, on the remaining player's own
-    "confirm in person" match line in Moje deble -- step one of two."""
-    builder = InlineKeyboardBuilder()
-    builder.button(
-        text=t("deletion.release_button", lang),
-        callback_data=ReleaseMatchCallback(invitation_id=invitation_id),
-    )
-    builder.adjust(1)
-    return builder.as_markup()
-
-
 def release_match_confirm_keyboard(invitation_id: int, lang: str) -> InlineKeyboardMarkup:
     """CLAUDE.md step 12: "a confirmation that says clearly this cannot be
     undone" -- step two, the only tap that actually releases the pairing."""

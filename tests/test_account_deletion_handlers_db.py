@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bot.handlers.account_deletion import (
     handle_delete_account_confirm,
     handle_delete_account_start,
+    handle_release_match_abort,
     handle_release_match_confirm,
     handle_release_match_start,
     handle_usun_konto,
@@ -26,7 +27,7 @@ from bot.handlers.account_deletion import (
 from bot.invitation_engine import accept_invitation, send_invitation
 from bot.keyboards.invitations import ReleaseMatchConfirmCallback
 from db import crud
-from db.models import Account, AgeCategory, Event, Gender, InvitationState, Player, PlayType, Tournament
+from db.models import Account, AccountViewer, AgeCategory, Event, Gender, InvitationState, Player, PlayType, Tournament
 
 _NOW = datetime(2026, 8, 7, 12, 0, tzinfo=timezone.utc)
 _GUID = "delh-t1"
@@ -117,6 +118,28 @@ async def test_usun_konto_shows_the_explain_screen(db_session: AsyncSession):
     text = message.answer.call_args.args[0]
     assert "Usunięcie konta CourtDuo" in text
     assert "Tej operacji nie można cofnąć." in text
+    # CLAUDE.md step 12.1, PROBLEM 1: gendered on the confirmed partner
+    # (here identical to Anna's own "W" gender per the same-gender
+    # eligibility rule), exact wording.
+    assert "Partnerka dowie się o usunięciu Twojego konta na CourtDuo i będzie mogła skasować waszą parę ze swoich debli na CourtDuo." in text
+    # CLAUDE.md step 12.1, PROBLEM 2: no viewer bullet for an account with
+    # no active viewers -- almost every account.
+    assert "podglądu" not in text
+
+
+async def test_usun_konto_shows_the_viewer_bullet_only_when_a_viewer_exists(db_session: AsyncSession):
+    await _add_user(db_session, "DELH002", "Testowa Basia", 8102)
+    account = await crud.get_account_by_pzt_id(db_session, "DELH002")
+    db_session.add(AccountViewer(account_id=account.id, viewer_telegram_id=9999, viewer_display_name="Testowy Rodzic"))
+    await db_session.flush()
+    message = MagicMock()
+    message.from_user.id = 8102
+    message.answer = AsyncMock()
+
+    await handle_usun_konto(message, db_session)
+
+    text = message.answer.call_args.args[0]
+    assert "Dostęp do podglądu Twojego konta zostanie usunięty." in text
 
 
 async def test_delete_account_confirm_notifies_partner_and_pending_counterparties(db_session: AsyncSession):
@@ -154,7 +177,7 @@ async def test_delete_account_confirm_notifies_partner_and_pending_counterpartie
     pushed = _pushes(bot)
     # Jagoda (confirmed partner) is told to confirm in person.
     assert pushed[8111] == [
-        "Anna Testowa usunęła swoje konto CourtDuo.\nSprawdź z nią osobiście, czy nadal gracie razem na tym turnieju."
+        "Anna Testowa usunęła swoje konto CourtDuo.\nPotwierdź z nią osobiście, czy nadal gracie razem na tym turnieju."
     ]
     # Ola (still-pending invitee) is told her invitation was cancelled.
     assert pushed[8112] == ["Anna Testowa usunęła swoje konto CourtDuo. Zaproszenie na WTK Testowo - 22.08.2026 zostało anulowane."]
@@ -177,8 +200,13 @@ async def test_release_match_flow_frees_the_tournament(db_session: AsyncSession)
 
     start_callback = _make_callback(8121)
     await handle_release_match_start(start_callback, MagicMock(invitation_id=matched.id), db_session)
-    assert "Zwolnij" not in _answers(start_callback)[0]
-    assert "cofnąć" in _answers(start_callback)[0]
+    # CLAUDE.md step 12.1, PROBLEM 5: exact wording, no gendered verb.
+    assert _answers(start_callback)[0] == "Czy na pewno chcesz usunąć tego debla?"
+
+    abort_callback = _make_callback(8121)
+    await handle_release_match_abort(abort_callback, db_session)
+    assert _answers(abort_callback)[0] == "Anulowane"
+    assert (await crud.get_invitation_by_id(db_session, matched.id)).state is InvitationState.ACCEPTED
 
     confirm_callback = _make_callback(8121)
     bot = _make_bot()

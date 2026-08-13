@@ -324,7 +324,7 @@ An invitation gets a third button alongside Zatwierdź and Odrzuć: **"Nie jadę
 
 ## Status display — "Moje deble"
 
-One place a player sees every invitation they have sent or received, and what happened to it. Reachable three ways: the `/moje_deble` command, the "Moje deble" label on the persistent reply keyboard (see "Navigation"), and the "Moje deble" button carried directly by the age-category screen.
+One place a player sees every invitation they have sent or received, and what happened to it. Reachable two ways: the `/moje_deble` command and the "Moje deble" label on the persistent reply keyboard (see "Navigation"). **Step 12.1, PROBLEM 6** removed the third: the age-category screen's own inline "Moje deble" (and "Znajdź partnera") button, added by build order step 8 — live testing found it duplicating the persistent keyboard while sitting inside a grid of real choices (the category buttons), where a mis-tap could lose the player's place. See "Navigation" and "Tournament selection" below.
 
 The summary message opens with a short heading (`Moje deble`) as its first line, so a player scrolling back through the chat knows what they're looking at without having to reread it — the age-category screen gets the same treatment, headed `Znajdź partnera`. A heading, not a paragraph.
 
@@ -373,6 +373,8 @@ Both directions are shown — invitations this player sent and ones they receive
 
 **No message needs a navigation button of its own.** Earlier steps attached an inline `[Menu]` button to every terminal message — one that ended a flow with nothing else to tap — since a mid-flow prompt like "Wpisz imię i nazwisko osoby, z którą chcesz grać." followed by navigation buttons is clutter that invites mis-taps, and there was otherwise no way back. The persistent reply keyboard (see "Navigation") replaces that entirely: it is always visible below the input box, on both terminal and mid-flow messages alike, so no individual message — terminal or mid-flow — carries a navigation button any more. A message keeps whatever flow-specific buttons it already had (a tournament list, a category list, a disambiguation list, "Zmień miejscowość", "Zmień kategorię wiekową", "Pokaż wszystkie turnieje", the invitation's three answer buttons, "Anuluj zaproszenie") and nothing else is added.
 
+Build order step 8 itself broke this rule without anyone noticing: it added "Moje deble" and "Znajdź partnera" as two more buttons on the age-category screen's own inline keyboard — a grid otherwise made entirely of real choices (the category buttons). Step 12.1, PROBLEM 6 removed them once live testing showed the mis-tap risk this rule already warned about, and used the same audit to confirm every other inline keyboard under `bot/keyboards/` is clean. The one keyboard that still deliberately duplicates a persistent-keyboard action is `invitation_sent_keyboard` (step 8.7's belt-and-braces inline "Moje deble" on "Zaproszenie zostało wysłane") — kept because the persistent keyboard itself can be collapsed by the player and this is the one screen they're most likely to need it right after.
+
 `/start` must never be the only way forward — it isn't: `Znajdź partnera` on the persistent keyboard returns the player straight to the age-category screen from anywhere.
 
 `tests/test_no_dead_ends.py` checks mechanically that none of the old inline-`[Menu]` machinery (`MenuCallback`, `terminal_keyboard`, `menu_keyboard`, the literal "🔵 Menu" button text) has crept back in anywhere under `bot/`. Actual button contents on any given message are covered by the handler-level tests in `tests/test_*_db.py` and the keyboard-builder tests in `tests/test_*_keyboards.py`, which assert what a real handler call or keyboard builder actually produces.
@@ -387,7 +389,9 @@ Deleting an account alone is not enough — a deleted player could re-register i
 
 A player deletes their own account from inside the bot — `/usun_konto`. This must not depend on an operator being awake, so there is no operator-only path for the normal case (see "Blocking" below for the one thing that genuinely does require a human at psql).
 
-Two-step confirmation, both screens inline-keyboard only (rule 1): the first states plainly what is about to happen — the account goes, pending invitations sent and received are cancelled and the other side told, confirmed matches are **not** cancelled, viewer access granted from this account is revoked — and ends with "Tej operacji nie można cofnąć." Only the second screen's tap actually deletes anything.
+Two-step confirmation, both screens inline-keyboard only (rule 1): the first states plainly what is about to happen — the account goes, pending invitations sent and received are cancelled and the other side told, confirmed matches are **not** cancelled — and ends with "Tej operacji nie można cofnąć." Only the second screen's tap actually deletes anything.
+
+**Step 12.1, PROBLEM 2:** the viewer-access bullet is shown only when the account actually has at least one active viewer grant to lose (`db.crud.count_active_viewers`) — viewers are an allowlisted test feature almost nobody has, so stating its removal unconditionally read as a confusing line about a feature the player had never seen. An account with no active viewers never sees that bullet; an account with one or more still does, worded exactly as before.
 
 On deletion:
 
@@ -405,7 +409,7 @@ This is the part that touches a real family, so it gets its own careful treatmen
 The remaining player is told:
 
 > *{Imię Nazwisko} usunął/usunęła swoje konto CourtDuo.*
-> *Sprawdź z nim/z nią osobiście, czy nadal gracie razem na tym turnieju.*
+> *Potwierdź z nim/z nią osobiście, czy nadal gracie razem na tym turnieju.*
 
 — gendered on the *deleted* player's own gender (usunął/usunęła), which is the one thing the remaining player is entitled to be told about them.
 
@@ -415,7 +419,9 @@ In Moje deble, that tournament keeps its match line, but with a distinct status 
 
 > ⚠️ *Jagoda Szewczyk — potwierdź osobiście*
 
-The remaining player gets exactly one manual escape: a "Zwolnij parę" button on that entry, behind its own two-step confirmation warning that this cannot be undone and should only be used after actually speaking to the other person. Tapping through moves the invitation to `CANCELLED` — the same state a normal step 8.6 inviter-cancel leaves behind, so nothing else needs to change for the tournament to count as free again and for the remaining player to invite someone else there.
+The remaining player gets exactly one manual escape: a "Usuń" button (renamed from "Zwolnij parę" by step 12.1, PROBLEM 4) on that entry, behind its own two-step confirmation — "Czy na pewno chcesz usunąć tego debla?", `[Tak, usuń]` `[Anuluj]` — cancelling it replies plainly "Anulowane". Tapping through moves the invitation to `CANCELLED` — the same state a normal step 8.6 inviter-cancel leaves behind, so nothing else needs to change for the tournament to count as free again and for the remaining player to invite someone else there.
+
+**Step 12.1, PROBLEM 4:** live testing found this entry rendered twice — the summary message showed the "potwierdź osobiście" line, and a second, separate follow-up message repeated the identical line purely to have somewhere to hang the "Usuń" button, the same pattern `bot.handlers.moje_deble` uses for pending invitations (which genuinely need their own message, since several can be open at once and the buttons would otherwise be ambiguous). A stranded match doesn't have that problem — the button unambiguously carries its own invitation id — so the button now rides on the summary message's own keyboard (`bot.keyboards.navigation.moje_deble_summary_keyboard`), alongside "Znajdź partnera", one "Usuń" per stranded match. The line appears exactly once, in the summary, where it already belonged.
 
 This is the single, explicitly documented exception to "Invitation engine"'s "a confirmed match is locked" rule. That rule exists to stop one party unilaterally walking away from a commitment the other side is relying on; it does not hold once one party has actually left the system, which is exactly the situation account deletion creates and exactly why the escape is manual, gated on the deletion having genuinely happened (`bot.invitation_engine.release_deleted_partner_match` re-verifies the other side's account is actually gone before allowing it), and available only to the player left behind — never to the one who deleted their own account, and never automatically.
 
@@ -566,7 +572,7 @@ The alarm's message text is operator-facing English, hardcoded in `bot.staleness
 ## Build order
 
 Twelve steps are built, merged, deployed and tested end-to-end against live PZT
-data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.7, 10.1–10.2) were
+data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.7, 10.1–10.2, 12.1) were
 corrections and refinements found by live testing; their behaviour is documented
 in the relevant sections above, which are the authoritative description. Steps
 11 and 12 were added after the original ten, once real users became imminent

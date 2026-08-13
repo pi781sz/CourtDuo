@@ -1,9 +1,10 @@
 """Inline keyboards for self-service account deletion (CLAUDE.md step 12,
 "Self-service deletion"). Two screens, three buttons total -- the first
 screen's "Usuń konto" leads to the second, which is the only one that
-actually deletes anything. Mirrors bot.keyboards.account_deletion's
-release-match pair (bot.keyboards.invitations.release_match_keyboard /
-release_match_confirm_keyboard) in shape.
+actually deletes anything. Mirrors the release-match confirmation pair
+(bot.keyboards.invitations.release_match_confirm_keyboard, the button
+itself carried by bot.keyboards.navigation.moje_deble_summary_keyboard
+since step 12.1) in shape.
 """
 
 from __future__ import annotations

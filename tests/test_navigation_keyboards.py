@@ -6,11 +6,13 @@ start of a session). Pure -- no database, no Telegram.
 
 from __future__ import annotations
 
+from bot.keyboards.invitations import ReleaseMatchCallback
 from bot.keyboards.navigation import (
     FindPartnerCallback,
     MojeDebleCallback,
     find_partner_keyboard,
     invitation_sent_keyboard,
+    moje_deble_summary_keyboard,
     persistent_menu_keyboard,
     viewer_menu_keyboard,
 )
@@ -83,8 +85,32 @@ def test_viewer_menu_keyboard_has_only_moje_deble_no_find_partner_no_invite():
     assert markup.is_persistent is True
 
 
+def test_moje_deble_summary_keyboard_with_no_stranded_matches_is_just_find_partner():
+    # CLAUDE.md step 12.1, PROBLEM 4: no extra buttons when nothing is
+    # stranded -- same single button as before.
+    markup = moje_deble_summary_keyboard("pl")
+
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert [button.text for button in buttons] == ["Znajdź partnera"]
+    assert buttons[0].callback_data == FindPartnerCallback().pack()
+
+
+def test_moje_deble_summary_keyboard_adds_one_usun_button_per_stranded_match():
+    # CLAUDE.md step 12.1, PROBLEM 4: the stranded match's own "Usuń"
+    # button rides on the summary's own keyboard instead of a repeated
+    # follow-up message -- one per stranded match, each carrying its own
+    # invitation id.
+    markup = moje_deble_summary_keyboard("pl", [101, 202])
+
+    buttons = [button for row in markup.inline_keyboard for button in row]
+    assert [button.text for button in buttons] == ["Znajdź partnera", "Usuń", "Usuń"]
+    assert buttons[1].callback_data == ReleaseMatchCallback(invitation_id=101).pack()
+    assert buttons[2].callback_data == ReleaseMatchCallback(invitation_id=202).pack()
+
+
 def test_find_partner_keyboard_and_moje_deble_callback_prefixes_unchanged():
-    # Still used elsewhere (bot.keyboards.tournament_search.category_keyboard,
-    # bot.handlers.moje_deble's own inline callback route).
+    # Still used elsewhere (find_partner_keyboard/moje_deble_summary_keyboard
+    # above, invitation_sent_keyboard, and bot.handlers.moje_deble's own
+    # inline callback route).
     assert FindPartnerCallback.__prefix__ == "fpart"
     assert MojeDebleCallback.__prefix__ == "mdeble"
