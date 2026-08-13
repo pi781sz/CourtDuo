@@ -211,8 +211,10 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
     assert "🔴 Bartosz Testowy — odmowa" in lines
     assert "🔴 Wiktoria Testowa — nie jedzie" in lines
 
-    markup = _markups(message)[0]
-    assert _button_texts(markup) == ["Znajdź partnera"]
+    # CLAUDE.md step 12.2: no "Znajdź partnera" button on the summary --
+    # duplicated the persistent reply keyboard's own label. Nothing
+    # stranded here, so no inline keyboard at all.
+    assert _markups(message)[0] is None
 
     # The sent-pending follow-up: the cancel button, not the answer keyboard.
     assert texts[1] == "🟠 Maja Testowa — wysłane"
@@ -237,7 +239,9 @@ async def test_received_pending_reads_differently_and_is_actionable(db_session: 
     assert "Karol Testowy" in summary_text
     # Not the sent-pending wording -- this one was received.
     assert "Karol Testowy — wysłane" not in summary_text
-    assert _button_texts(_markups(message)[0]) == ["Znajdź partnera"]
+    # CLAUDE.md step 12.2: no inline keyboard on the summary when nothing
+    # is stranded -- see the equivalent assertion above.
+    assert _markups(message)[0] is None
 
     follow_up_text = texts[1]
     assert follow_up_text == "🟠 Karol Testowy — zaprasza"
@@ -320,7 +324,9 @@ async def test_stranded_match_appears_once_with_its_usun_button_on_the_summary(d
     assert "⚠️ Jagoda Testowa — potwierdź osobiście" in texts[0]
 
     markup = _markups(message)[0]
-    assert _button_texts(markup) == ["Znajdź partnera", "Usuń"]
+    # CLAUDE.md step 12.2: no "Znajdź partnera" button alongside "Usuń" --
+    # it duplicated the persistent reply keyboard's own label.
+    assert _button_texts(markup) == ["Usuń"]
     release_button = markup.inline_keyboard[-1][0]
     assert release_button.callback_data == ReleaseMatchCallback(invitation_id=matched.id).pack()
 
@@ -371,15 +377,17 @@ async def test_cancelled_invitations_are_absent(db_session: AsyncSession):
 # --- EMPTY STATE ------------------------------------------------------------------
 
 
-async def test_empty_state_offers_find_partner_only(db_session: AsyncSession):
+async def test_empty_state_has_no_inline_keyboard(db_session: AsyncSession):
+    # CLAUDE.md step 12.2: the inline "Znajdź partnera" button this used
+    # to carry duplicated the persistent reply keyboard's own label,
+    # already visible below the input box -- removed.
     await _add_user(db_session, "MDB040", "Testowa Anna", telegram_id=910040)
 
     message = _make_message(910040)
     await handle_moje_deble_command(message, db_session)
 
     assert _texts(message) == ["Nie masz jeszcze żadnych zaproszeń."]
-    markup = _markups(message)[0]
-    assert _button_texts(markup) == ["Znajdź partnera"]
+    assert _markups(message)[0] is None
 
 
 async def test_command_before_registration_does_not_crash(db_session: AsyncSession):
