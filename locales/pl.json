@@ -5,15 +5,15 @@
   },
   "start": {
     "greeting": "Cześć! 🎾 CourtDuo pomoże Ci znaleźć partnera do debla.",
-    "greeting_returning": "Cześć ponownie!",
+    "greeting_returning": "Witaj ponownie!",
     "greeting_viewer": "Cześć! Masz dostęp do podglądu konta CourtDuo."
   },
   "registration": {
     "ask_pzt_id": "Aby zacząć, podaj swój login PZT.",
     "welcome": "Witaj {first_name}.",
     "not_found": "Nie znaleziono zawodnika o takim loginie PZT. Sprawdź login i spróbuj ponownie.",
-    "already_bound": "Ten login PZT jest już powiązany z innym kontem Telegram.",
-    "too_many_attempts": "Zbyt wiele prób. Spróbuj ponownie za godzinę.",
+    "already_bound": "Ten login PZT jest już powiązany z innym kontem na Telegramie.",
+    "too_many_attempts": "Zbyt wiele nieudanych prób. Spróbuj ponownie za godzinę.",
     "error_try_later": "Wystąpił błąd. Spróbuj ponownie później."
   },
   "tournament_search": {
@@ -152,8 +152,8 @@
   },
   "pending_external_invite": {
     "joined": {
-      "M": "{name} dołączył do CourtDuo. Możesz teraz wysłać mu prawdziwe zaproszenie.",
-      "W": "{name} dołączyła do CourtDuo. Możesz teraz wysłać jej prawdziwe zaproszenie."
+      "M": "{name} dołączył do CourtDuo. Możesz teraz wysłać mu zaproszenie do wspólnej gry.",
+      "W": "{name} dołączyła do CourtDuo. Możesz teraz wysłać jej zaproszenie do wspólnej gry."
     },
     "send_button": "Wyślij zaproszenie"
   },
@@ -167,7 +167,7 @@
     "revoke_button": "Skasuj dostęp #{index}",
     "limit_reached": "Masz już maksymalną liczbę 3 osób z dostępem podglądu. Odwołaj jedną z nich, aby dodać nową.",
     "invite_created": "Wyślij link z dostępem\n\nLink jest jednorazowy i ważny 24 godziny.",
-    "invite_share_text": "Zapraszam Cię do podglądu mojego konta CourtDuo. Link jednorazowy i ważny 24 godziny. {link}",
+    "invite_share_text": "Zapraszam Cię do podglądu mojego konta CourtDuo. Link jest jednorazowy i ważny 24 godziny. {link}",
     "revoked": "Odwołano dostęp.",
     "player_notified_grant": "{telegram_name} ma teraz dostęp do podglądu Twojego konta CourtDuo.",
     "bound": {
