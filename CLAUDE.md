@@ -505,7 +505,7 @@ Both scrapers run from **systemd timers on the server** (step 13), not GitHub Ac
 - **Tournaments:** 3× daily.
 - **Rankings:** daily at 15:00 Europe/Warsaw during the first 10 days of each month, weekly otherwise. Each run reads the index first and re-scrapes the eight lists **only if the published month changed.**
 
-Frequencies are unchanged from the original GitHub Actions cron schedule — only the host moved. Unit files live in `deploy/` (`courtduo-tournaments.service`/`.timer`, `courtduo-rankings.service`, `courtduo-rankings.timer` + `courtduo-rankings-weekly.timer` for the two legs of the rankings schedule, `courtduo-logrotate` for the journald size cap); see `deploy/README.md` for install steps.
+Frequencies are unchanged from what this section always specified. Note for the record: the GitHub Actions cron described here before step 13 **was never actually created** — the only workflow in the repo has always been `test-scraper.yml`, `workflow_dispatch`-only and `--dry-run`, which writes nothing. Until step 13 the scrapers had only ever been run by hand, which is why the database sat empty for weeks while the spec described a schedule. The systemd timers are the first automated scraping this project has had. Unit files live in `deploy/` (`courtduo-tournaments.service`/`.timer`, `courtduo-rankings.service`, `courtduo-rankings.timer` + `courtduo-rankings-weekly.timer` for the two legs of the rankings schedule, `courtduo-logrotate` for the journald size cap); see `deploy/README.md` for install steps.
 
 The bot always reads the newest available `(year, month)`. Older lists stay in the table.
 
@@ -575,11 +575,11 @@ The alarm's message text is operator-facing English, hardcoded in `bot.staleness
 
 ## Build order
 
-Twelve steps are built, merged, deployed and tested end-to-end against live PZT
+Thirteen steps are built, merged, deployed and tested end-to-end against live PZT
 data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.7, 10.1–10.2, 12.1–12.2) were
 corrections and refinements found by live testing; their behaviour is documented
 in the relevant sections above, which are the authoritative description. Steps
-11 and 12 were added after the original ten, once real users became imminent
+11, 12 and 13 were added after the original ten, once real users became imminent
 rather than being part of the initial plan — see "Operations" and "Account
 deletion and blocking" for their authoritative descriptions.
 
@@ -595,13 +595,12 @@ deletion and blocking" for their authoritative descriptions.
 10. ~~Read-only viewers (allowlisted test feature)~~ **done**
 11. ~~Staleness alarm and `/status`~~ **done**
 12. ~~Account deletion and blocking~~ **done**
+13. ~~Scrapers onto systemd timers, with logrotate~~ **done**
 
 ## Not yet built
 
 Not part of the original build order, but required before real users:
 
-- **Scrapers on systemd timers** rather than GitHub Actions cron, with a
-  `workflow_dispatch`-only workflow kept as a manual fallback.
 - **Results-confirmed verification.** Scrape `TournamentResults.aspx` after
   tournaments end and check whether a matched pair actually appears in the
   doubles draw. Collect the data before showing any badge.
