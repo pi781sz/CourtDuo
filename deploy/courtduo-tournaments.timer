@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the CourtDuo tournament scraper three times daily
+
+[Timer]
+# CLAUDE.md "Scraper scheduling": tournaments run three times a day.
+# Spread evenly across the day; RandomizedDelaySec keeps the three runs
+# from landing on the exact same second every day.
+OnCalendar=*-*-* 06,14,22:00:00 Europe/Warsaw
+Persistent=true
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target

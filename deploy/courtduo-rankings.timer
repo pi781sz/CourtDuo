@@ -1,0 +1,18 @@
+[Unit]
+Description=Run the CourtDuo ranking scraper daily during the first 10 days of the month
+
+[Timer]
+# CLAUDE.md "Scraper scheduling": rankings run daily at 15:00 Europe/Warsaw
+# during the first 10 days of each month (when PZT is most likely to have
+# just published a new list), and weekly otherwise — see
+# courtduo-rankings-weekly.timer for the rest of the month. Both timers
+# trigger the same courtduo-rankings.service; the scraper's own
+# month-changed check (scrapers/rankings) is what keeps extra runs cheap,
+# so this file only decides when to ask, same as the weekly one.
+OnCalendar=*-*-01..10 15:00:00 Europe/Warsaw
+Persistent=true
+RandomizedDelaySec=5min
+Unit=courtduo-rankings.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,18 @@
+# Journal size cap for the CourtDuo scraper units.
+#
+# The scrapers print progress to stderr and systemd sends that straight to
+# journald (see DEPLOY.md / README.md — there is no flat log file under
+# /opt/courtduo for classic logrotate to rotate). So despite this file's
+# name, it is a journald configuration drop-in, not a logrotate rule.
+# It is named courtduo-logrotate to keep "cap the scraper log volume" as
+# one clearly-named file in this directory, matching the rest of deploy/.
+#
+# Install as /etc/systemd/journald.conf.d/courtduo.conf — see README.md.
+#
+# Keeps roughly the last 200 MB of journal, which is plenty for two
+# oneshot scrapers running a handful of times a day, on a server where
+# disk is the constrained resource.
+
+[Journal]
+SystemMaxUse=200M
+SystemKeepFree=100M

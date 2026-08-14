@@ -1,0 +1,16 @@
+[Unit]
+Description=CourtDuo ranking scraper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=courtduo
+Group=courtduo
+WorkingDirectory=/opt/courtduo
+ExecStart=/opt/courtduo/venv/bin/python -m scrapers.rankings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/courtduo
