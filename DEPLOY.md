@@ -47,7 +47,6 @@ BOT_TOKEN=
 DATABASE_URL=
 DEFAULT_LANG=pl
 VIEWER_ALLOWLIST_PZT_IDS=
-ALARM_TELEGRAM_IDS=
 ```
 
 | Variable | Notes |
@@ -56,7 +55,6 @@ ALARM_TELEGRAM_IDS=
 | `DATABASE_URL` | `postgresql://…`; the app rewrites the scheme for asyncpg itself |
 | `DEFAULT_LANG` | `pl`. `en` scaffolding exists but `locales/en.json` is not written |
 | `VIEWER_ALLOWLIST_PZT_IDS` | Comma-separated. Leave empty to disable the read-only viewer feature |
-| `ALARM_TELEGRAM_IDS` | Comma-separated numeric Telegram ids. Who the staleness alarm notifies and who `/status` answers for — see "Staleness alarm" below |
 
 Lock it down:
 
@@ -208,21 +206,7 @@ set -a; . ./.env; set +a
 
 **A caution about scheduled workflows in public repositories.** GitHub disables them automatically after 60 days without commits to the default branch, with no visible warning beyond one email. The bot will not crash — it keeps reading the database and serving progressively staler data, until every tournament ages out of the search window and every search returns "nothing found", which is indistinguishable from a genuine empty result.
 
----
-
-## Staleness alarm
-
-Built-in, not something you need to set up separately. The bot checks each scraper's run history (the `scraper_runs` table — see CLAUDE.md "Operations") 30 seconds after startup and every 6 hours after that. If tournaments hasn't had a successful run in 36 hours, or rankings in 216 hours (9 days — it only runs weekly outside the first ten days of a month), every id in `ALARM_TELEGRAM_IDS` gets a Telegram message, with a reminder every 24 hours until it recovers.
-
-Leave `ALARM_TELEGRAM_IDS` empty and the alarm still runs and still logs a warning — it just has nobody to notify.
-
-The same list can run `/status` against the bot at any time for a plain-text snapshot of both scrapers' last successful run, last run outcome, and current threshold state. Anyone not on the list gets no reply at all.
-
----
-
-## Account deletion and blocking
-
-Players delete their own account from inside the bot (`/usun_konto`) — nothing to set up. Blocking a PZT id (so it can't register or use invitations again, even if it already has an account) is operator-only and deliberately has no bot command at all: it's done directly in `psql`. See **`docs/RUNBOOK.md`** for the copy-pasteable SQL — blocking, unblocking, deleting an account on a player's behalf when they can't do it themselves, and answering a subject access request.
+If you rely on scheduled Actions, add an independent check that the newest `scraped_at` in `tournaments` is recent, and alert on it.
 
 ---
 
