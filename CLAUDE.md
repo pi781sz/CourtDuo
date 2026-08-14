@@ -500,8 +500,12 @@ Captured per player: `pzt_id`, `full_name`, `club`, `position`, `itf_note`.
 
 ## Scraper scheduling
 
-- **Tournaments:** 3× daily via GitHub Actions cron
+Both scrapers run from **systemd timers on the server** (step 13), not GitHub Actions cron. GitHub disables scheduled workflows automatically after 60 days with no commits to the default branch — silently, with no banner in the Actions tab, just one easily-missed email — which is a real risk for a low-commit-velocity public repo like this one. A `workflow_dispatch`-only GitHub workflow (no `schedule:` block) is kept as a manual fallback; manually-triggered workflows are exempt from the 60-day rule. Do not move scheduling back to GitHub Actions cron — that is the exact failure mode this step exists to avoid.
+
+- **Tournaments:** 3× daily.
 - **Rankings:** daily at 15:00 Europe/Warsaw during the first 10 days of each month, weekly otherwise. Each run reads the index first and re-scrapes the eight lists **only if the published month changed.**
+
+Frequencies are unchanged from the original GitHub Actions cron schedule — only the host moved. Unit files live in `deploy/` (`courtduo-tournaments.service`/`.timer`, `courtduo-rankings.service`, `courtduo-rankings.timer` + `courtduo-rankings-weekly.timer` for the two legs of the rankings schedule, `courtduo-logrotate` for the journald size cap); see `deploy/README.md` for install steps.
 
 The bot always reads the newest available `(year, month)`. Older lists stay in the table.
 

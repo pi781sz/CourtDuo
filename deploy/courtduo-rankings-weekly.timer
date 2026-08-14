@@ -1,0 +1,18 @@
+[Unit]
+Description=Run the CourtDuo ranking scraper weekly after the first 10 days of the month
+
+[Timer]
+# The other half of CLAUDE.md's rankings schedule (see
+# courtduo-rankings.timer): weekly, on the 11th through the end of the
+# month. Wednesday matches PZT's own usual publish day (CLAUDE.md:
+# "PZT publishes on the first Wednesday monthly but is often late").
+# Day range 11..31 is three weeks wide, so this fires roughly weekly;
+# months with fewer than 31 days simply have no matching date past their
+# last day, which is a no-op, not a missed run.
+OnCalendar=Wed *-*-11..31 15:00:00 Europe/Warsaw
+Persistent=true
+RandomizedDelaySec=5min
+Unit=courtduo-rankings.service
+
+[Install]
+WantedBy=timers.target
