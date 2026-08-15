@@ -530,7 +530,7 @@ Every invitation must route through `can_send_invitation`. When paid tiers launc
 - Python 3.11+, `aiogram` 3, PostgreSQL
 - `httpx` + `selectolax` for scraping
 - SQLAlchemy models, Alembic migrations
-- Scrapers on GitHub Actions cron; bot on a small always-on VM
+- Scrapers on systemd timers on the server; bot on a small always-on VM
 
 **Scraping etiquette:** rate limit to ~1 request per 2 seconds, descriptive `User-Agent` with a contact email, cache aggressively, fail loudly rather than writing garbage.
 
