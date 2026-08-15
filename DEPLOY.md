@@ -1,6 +1,6 @@
 # Deploying CourtDuo
 
-Setting up and running the bot on a Linux server. Written for Ubuntu 24.04; anything else with Python 3.11+ works with minor changes.
+Setting up and running the bot on a Linux server. Verified on Ubuntu 24.04 and Ubuntu 26.04; anything else with Python 3.11+ works with minor changes.
 
 Nothing here is architecture-specific — ARM and x86 both work.
 
@@ -20,7 +20,7 @@ Run the bot as an **unprivileged system user**, never as root. It is internet-fa
 
 ```bash
 # prerequisites
-apt-get update -qq && apt-get install -y -qq python3-venv python3-pip postgresql-client
+apt-get update -qq && apt-get install -y -qq python3-venv python3-pip postgresql-client git
 
 # unprivileged user, home directory doubles as the install path
 adduser --system --group --home /opt/courtduo --shell /usr/sbin/nologin courtduo
@@ -36,6 +36,8 @@ python3 -m venv venv
 ./venv/bin/pip install --quiet -r requirements.txt
 ```
 
+`git` is only coincidentally preinstalled on some base images — it's listed explicitly above so this works regardless. A full install was verified 2026-08-15 on Ubuntu 26.04 LTS / Python 3.14.4 (x86_64, Hetzner Cloud CX23, Helsinki): `git 2.53.0` and `curl` were already present in that base image, `psql (PostgreSQL) 18.4`, and every compiled dependency (`asyncpg`, `selectolax`, `pydantic-core`, `aiohttp`, `greenlet`) had a cp314 manylinux x86_64 wheel, so `pip install` needed no compiler. Installed versions: `aiogram` 3.30.0, `SQLAlchemy` 2.0.52, `alembic` 1.19.1, `httpx` 0.28.1, `python-dotenv` 1.2.2.
+
 ---
 
 ## Configuration
@@ -45,16 +47,22 @@ The app reads `.env` from its working directory. Copy `.env.example` and fill it
 ```
 BOT_TOKEN=
 DATABASE_URL=
+SCRAPER_CONTACT_EMAIL=
 DEFAULT_LANG=pl
 VIEWER_ALLOWLIST_PZT_IDS=
+ALARM_TELEGRAM_IDS=
 ```
 
 | Variable | Notes |
 |---|---|
 | `BOT_TOKEN` | From @BotFather |
 | `DATABASE_URL` | `postgresql://…`; the app rewrites the scheme for asyncpg itself |
+| `SCRAPER_CONTACT_EMAIL` | Sent as part of the scrapers' `User-Agent` header so PZT can make contact. Optional — `core/http.py` falls back to a default when unset |
 | `DEFAULT_LANG` | `pl`. `en` scaffolding exists but `locales/en.json` is not written |
 | `VIEWER_ALLOWLIST_PZT_IDS` | Comma-separated. Leave empty to disable the read-only viewer feature |
+| `ALARM_TELEGRAM_IDS` | Comma-separated numeric Telegram ids. These receive staleness alerts and are the only ids that may use the operator-only `/status` command. Leave empty to disable notifications — the alarm still runs and still logs a warning, it just has nobody to tell |
+
+Two more environment variables exist purely to override the staleness alarm's thresholds for testing, without a code change — `STALENESS_TOURNAMENTS_HOURS` and `STALENESS_RANKINGS_HOURS` (default 36 and 216 hours; see `bot/staleness.py`). Neither is needed for a normal deploy, and neither is in `.env.example`.
 
 Lock it down:
 
@@ -180,6 +188,10 @@ Each gets its own `.env`, venv and systemd unit. They share nothing.
 
 **Only one process may poll a given bot token at a time.** Two instances on the same token fight over updates and behave erratically. When moving servers, stop the old service *before* starting the new one.
 
+**The scraper units are not part of this split.** `deploy/courtduo-tournaments.service` and `deploy/courtduo-rankings.service` hardcode `WorkingDirectory=/opt/courtduo` — whichever checkout lives at that exact path is the one the scrapers feed; the other environment gets no scraped data at all unless you copy the unit files and edit that path yourself. See `deploy/README.md` for the full explanation.
+
+The directory name and the systemd service name are chosen independently of each other — nothing ties `/opt/courtduo-test` to a service literally called `courtduo-test`. A deploy has already broken from exactly this: code was pulled into one directory while `systemctl restart` targeted a service name that didn't match it, so the running process never actually restarted. Whatever directory/service pairing you choose, write it down.
+
 ---
 
 ## Moving to another server
@@ -195,7 +207,7 @@ Almost no state lives on the machine — code is in git, data is in Postgres. A 
 
 ## Scrapers
 
-Currently run on GitHub Actions cron. They also run fine on the server:
+Both scrapers run on **systemd timers on the server**, not GitHub Actions — see `deploy/README.md` for the unit files and install steps. They can also be run directly, same as the timers do:
 
 ```bash
 cd /opt/courtduo
@@ -204,9 +216,9 @@ set -a; . ./.env; set +a
 ./venv/bin/python -m scrapers.tournaments
 ```
 
-**A caution about scheduled workflows in public repositories.** GitHub disables them automatically after 60 days without commits to the default branch, with no visible warning beyond one email. The bot will not crash — it keeps reading the database and serving progressively staler data, until every tournament ages out of the search window and every search returns "nothing found", which is indistinguishable from a genuine empty result.
+Scheduling lives on the server because GitHub disables scheduled workflows automatically after 60 days without a commit to the default branch — silently, with no banner in the Actions tab, just one easily-missed email. That's a real problem for a low-commit-velocity public repo, and it's the reason scheduling moved to systemd timers rather than a live risk to guard against here: the only GitHub workflow in this repo, `.github/workflows/test-scraper.yml`, is `workflow_dispatch`-only and `--dry-run`, so it writes nothing and is exempt from the 60-day disable.
 
-If you rely on scheduled Actions, add an independent check that the newest `scraped_at` in `tournaments` is recent, and alert on it.
+**A dead or failing scraper doesn't rely on anyone noticing by chance.** The staleness alarm (`bot/staleness.py`) checks 30 seconds after the bot starts and every 6 hours after, comparing each scraper's newest successful `scraper_runs` row against a threshold (36 hours for tournaments, 216 hours / 9 days for rankings), and messages every id in `ALARM_TELEGRAM_IDS` (see "Configuration" above) when a scraper is stale, plus a reminder every 24 hours until it recovers. The same ids can send `/status` to the bot at any time for a plain-text report of both scrapers' last successful run, last run, and current threshold state. Set `ALARM_TELEGRAM_IDS` for this to have anywhere to send alerts and anyone able to use `/status` — leave it empty and the alarm still runs and logs, it just has nobody to tell.
 
 ---
 
