@@ -28,7 +28,7 @@ from bot.handlers.moje_deble import (
     handle_moje_deble_button_press,
     handle_moje_deble_command,
 )
-from bot.keyboards.invitations import ReleaseMatchCallback
+from bot.keyboards.invitations import CancelInvitationCallback, ReleaseMatchCallback
 from bot.moje_deble import group_by_tournament, render_groups
 from db import crud
 from db.models import Account, AgeCategory, Event, Gender, Invitation, InvitationState, Player, PlayType, Tournament
@@ -137,6 +137,24 @@ def _button_texts(markup) -> list[str]:
     return [button.text for row in markup.inline_keyboard for button in row]
 
 
+_STATUS_EMOJI_PREFIXES = ("🟠", "🔴", "🟢", "⚠️")
+
+
+def _all_entry_lines(mock: MagicMock) -> list[str]:
+    """Every entry_line()-shaped line across every message a render sent:
+    each line of the summary body that starts with one of the status
+    emoji, plus every follow-up message in full (a follow-up message
+    *is* a single entry_line() call). Tournament headings and the summary
+    heading are never mistaken for an entry line -- they never start with
+    one of these emoji."""
+    lines = []
+    for text in _texts(mock):
+        for line in text.split("\n"):
+            if line.startswith(_STATUS_EMOJI_PREFIXES):
+                lines.append(line)
+    return lines
+
+
 # --- db.crud.get_invitations_for_player ----------------------------------------
 
 
@@ -196,9 +214,11 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
     texts = _texts(message)
     # No pending *received* invitations anywhere in this scenario
     # (tournament 1 is matched-only, tournament 2 is all sent), so no
-    # answer-keyboard follow-ups -- but the one still-open sent invitation
-    # (to Maja) gets its own cancel-button follow-up (CLAUDE.md step 8.6).
-    assert len(texts) == 2
+    # answer-keyboard follow-ups. The one still-open sent invitation (to
+    # Maja) no longer gets a follow-up message of its own either -- its
+    # line stays in the summary body and its cancel button rides on the
+    # summary message's own keyboard instead (no-duplicate-lines fix).
+    assert len(texts) == 1
     lines = texts[0].split("\n")
     # CLAUDE.md step 8.3, PROBLEM 6: a heading as the first line.
     assert lines[0] == "Moje deble"
@@ -213,12 +233,10 @@ async def test_moje_deble_matches_claude_md_layout_and_directions(db_session: As
 
     # CLAUDE.md step 12.2: no "Znajdź partnera" button on the summary --
     # duplicated the persistent reply keyboard's own label. Nothing
-    # stranded here, so no inline keyboard at all.
-    assert _markups(message)[0] is None
-
-    # The sent-pending follow-up: the cancel button, not the answer keyboard.
-    assert texts[1] == "🟠 Maja Testowa — wysłane"
-    assert _button_texts(_markups(message)[1]) == ["Anuluj zaproszenie"]
+    # stranded here, but the still-open sent invitation to Maja gets its
+    # own named cancel button.
+    markup = _markups(message)[0]
+    assert _button_texts(markup) == ["Anuluj: Maja Testowa"]
 
 
 async def test_received_pending_reads_differently_and_is_actionable(db_session: AsyncSession):
@@ -231,22 +249,18 @@ async def test_received_pending_reads_differently_and_is_actionable(db_session: 
     await handle_moje_deble_command(message, db_session)
 
     texts = _texts(message)
-    # CLAUDE.md step 8.1, PROBLEM 3: the summary is one message; a still
-    # pending received invitation gets its own follow-up message with the
-    # three answer buttons, not a slot in the summary's own keyboard.
-    assert len(texts) == 2
-    summary_text = texts[0]
-    assert "Karol Testowy" in summary_text
-    # Not the sent-pending wording -- this one was received.
-    assert "Karol Testowy — wysłane" not in summary_text
-    # CLAUDE.md step 12.2: no inline keyboard on the summary when nothing
-    # is stranded -- see the equivalent assertion above.
-    assert _markups(message)[0] is None
+    # This player has nothing but one still-open *received* invitation --
+    # its line is left out of the summary body (no-duplicate-lines fix),
+    # which leaves the one tournament group with nothing left in it, which
+    # in turn leaves the whole summary with nothing to show. So no summary
+    # message at all: just the one follow-up message with the three
+    # answer buttons (CLAUDE.md step 8.1, PROBLEM 3).
+    assert len(texts) == 1
 
-    follow_up_text = texts[1]
+    follow_up_text = texts[0]
     assert follow_up_text == "🟠 Karol Testowy — zaprasza"
 
-    markup = _markups(message)[1]
+    markup = _markups(message)[0]
     button_texts = _button_texts(markup)
     # CLAUDE.md step 8.4: exactly the three answers, no Menu button.
     assert button_texts == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
@@ -265,13 +279,14 @@ async def test_one_follow_up_message_per_pending_received_invitation(db_session:
     await handle_moje_deble_command(message, db_session)
 
     texts = _texts(message)
-    # One summary message, plus one follow-up per pending received
-    # invitation -- CLAUDE.md step 8.1, PROBLEM 3.
-    assert len(texts) == 3
-    follow_ups = texts[1:]
-    assert any("Karol Testowy" in text for text in follow_ups)
-    assert any("Ola Testowa" in text for text in follow_ups)
-    for markup in _markups(message)[1:]:
+    # Both invitations here are still-open received ones, so both
+    # tournament groups end up empty in the summary and the summary is
+    # skipped entirely (CLAUDE.md, "EMPTY GROUPS") -- one follow-up
+    # message per pending received invitation, nothing else.
+    assert len(texts) == 2
+    assert any("Karol Testowy" in text for text in texts)
+    assert any("Ola Testowa" in text for text in texts)
+    for markup in _markups(message):
         assert len(_button_texts(markup)) == 3
 
 
@@ -292,12 +307,23 @@ async def test_sent_pending_gets_cancel_button_received_pending_gets_answer_butt
     message = _make_message(910080)
     await handle_moje_deble_command(message, db_session)
 
-    follow_ups = list(zip(_texts(message)[1:], _markups(message)[1:]))
-    sent_follow_up = next(text_markup for text_markup in follow_ups if "Karol" in text_markup[0])
-    received_follow_up = next(text_markup for text_markup in follow_ups if "Ola" in text_markup[0])
+    # Anna's own sent invitation (to Karol) stays in the summary body and
+    # gets its named cancel button on the summary keyboard -- no follow-up
+    # message of its own any more. Ola's invitation to Anna is still-open
+    # *received*, so it gets its own follow-up message with the three
+    # answer buttons, and its line is left out of the summary body/dropped
+    # its (otherwise-empty) tournament group from the summary entirely.
+    texts = _texts(message)
+    assert len(texts) == 2
 
-    assert _button_texts(sent_follow_up[1]) == ["Anuluj zaproszenie"]
-    assert _button_texts(received_follow_up[1]) == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
+    summary_text, summary_markup = texts[0], _markups(message)[0]
+    assert "Karol Testowy — wysłane" in summary_text
+    assert "Ola" not in summary_text
+    assert _button_texts(summary_markup) == ["Anuluj: Karol Testowy"]
+
+    follow_up_text, follow_up_markup = texts[1], _markups(message)[1]
+    assert follow_up_text == "🟠 Ola Testowa — zaprasza"
+    assert _button_texts(follow_up_markup) == ["Zatwierdź", "Odrzuć", "Nie jadę na ten turniej"]
 
 
 # --- A stranded match (CLAUDE.md step 12.1, PROBLEM 4): shown once -------------
@@ -465,3 +491,138 @@ async def test_moje_deble_button_press_before_registration_does_not_crash(db_ses
     markup = _markups(message)[0]
     assert markup.is_persistent is True
     assert markup.resize_keyboard is True
+
+
+# --- No-duplicate-lines fix: an entry line is never rendered twice -------------
+#
+# A bug report found a still-open sent invitation's line rendered in the
+# summary AND repeated, verbatim, in a follow-up message that existed only
+# to hang the cancel button on. The fix follows the precedent already set
+# for a stranded match's "Usuń" button: fold the button onto the summary
+# message's own keyboard instead of a second message. These tests cover
+# every kind of entry this view can show at once, and the two "still-open"
+# cases and the "everything omitted" edge case individually.
+
+
+async def test_no_entry_line_appears_more_than_once_across_all_messages(db_session: AsyncSession):
+    await _add_user(db_session, "MDB200", "Testowa Anna", telegram_id=910200)
+    await _add_user(db_session, "MDB201", "Testowa Jagoda", telegram_id=910201)  # stranded match
+    await _add_user(db_session, "MDB202", "Testowy Karol")  # still-open sent
+    await _add_user(db_session, "MDB203", "Testowa Ola")  # still-open received
+    await _add_user(db_session, "MDB204", "Testowy Bartosz")  # rejected
+    await _add_user(db_session, "MDB205", "Testowa Wiktoria")  # not attending
+    await _add_tournament(db_session, "mdb-t200", _FAR_FUTURE, venue_city="A")
+    await _add_tournament(db_session, "mdb-t201", _FAR_FUTURE + timedelta(days=1), venue_city="B")
+    await _add_tournament(db_session, "mdb-t202", _FAR_FUTURE + timedelta(days=2), venue_city="C")
+    await _add_tournament(db_session, "mdb-t203", _FAR_FUTURE + timedelta(days=3), venue_city="D")
+    await _add_tournament(db_session, "mdb-t204", _FAR_FUTURE + timedelta(days=4), venue_city="E")
+
+    await _add_invitation(db_session, "MDB200", "MDB201", "mdb-t200", InvitationState.ACCEPTED)
+    await _add_invitation(db_session, "MDB200", "MDB202", "mdb-t201", InvitationState.PENDING)
+    await _add_invitation(db_session, "MDB203", "MDB200", "mdb-t202", InvitationState.PENDING)
+    await _add_invitation(db_session, "MDB200", "MDB204", "mdb-t203", InvitationState.REJECTED)
+    await _add_invitation(db_session, "MDB200", "MDB205", "mdb-t204", InvitationState.NOT_ATTENDING)
+
+    jagoda = await crud.get_account_by_pzt_id(db_session, "MDB201")
+    await delete_account(db_session, jagoda, today=date(2026, 8, 7))
+    await db_session.flush()
+
+    message = _make_message(910200)
+    await handle_moje_deble_command(message, db_session)
+
+    entry_lines = _all_entry_lines(message)
+    assert len(entry_lines) == len(set(entry_lines)), f"a line repeated: {entry_lines}"
+
+    # Sanity: every one of the five entries actually showed up somewhere,
+    # so this isn't passing by having silently dropped one.
+    joined = "\n".join(_texts(message))
+    for name in ("Jagoda Testowa", "Karol Testowy", "Ola Testowa", "Bartosz Testowy", "Wiktoria Testowa"):
+        assert name in joined
+
+
+async def test_still_open_sent_invitation_produces_exactly_one_message(db_session: AsyncSession):
+    await _add_user(db_session, "MDB210", "Testowa Anna", telegram_id=910210)
+    await _add_user(db_session, "MDB211", "Testowy Karol")
+    await _add_tournament(db_session, "mdb-t210", _FAR_FUTURE)
+    invitation = await _add_invitation(db_session, "MDB210", "MDB211", "mdb-t210", InvitationState.PENDING)
+
+    message = _make_message(910210)
+    await handle_moje_deble_command(message, db_session)
+
+    assert len(_texts(message)) == 1
+    markup = _markups(message)[0]
+    assert _button_texts(markup) == ["Anuluj: Karol Testowy"]
+    assert markup.inline_keyboard[0][0].callback_data == CancelInvitationCallback(
+        invitation_id=invitation.id
+    ).pack()
+
+
+async def test_still_open_received_invitation_appears_only_in_its_own_message(db_session: AsyncSession):
+    await _add_user(db_session, "MDB220", "Testowa Anna", telegram_id=910220)
+    await _add_user(db_session, "MDB221", "Testowy Karol")
+    await _add_user(db_session, "MDB222", "Testowa Ola")
+    await _add_tournament(db_session, "mdb-t220", _FAR_FUTURE, venue_city="Radom")
+    # A second, matched entry at a different tournament, so the summary
+    # message still gets sent (otherwise this would collapse into the
+    # all-omitted case exercised separately below).
+    await _add_tournament(db_session, "mdb-t221", _FAR_FUTURE + timedelta(days=1), venue_city="Łódź")
+    await _add_invitation(db_session, "MDB221", "MDB220", "mdb-t220", InvitationState.PENDING)
+    await _add_invitation(db_session, "MDB220", "MDB222", "mdb-t221", InvitationState.ACCEPTED)
+
+    message = _make_message(910220)
+    await handle_moje_deble_command(message, db_session)
+
+    texts = _texts(message)
+    summary_text = texts[0]
+    assert "Karol Testowy" not in summary_text
+
+    received_messages = [text for text in texts if text == "🟠 Karol Testowy — zaprasza"]
+    assert len(received_messages) == 1
+
+
+async def test_empty_group_dropped_but_other_groups_keep_their_heading(db_session: AsyncSession):
+    # CLAUDE.md, "EMPTY GROUPS": one tournament has nothing but a
+    # still-open received invitation and disappears from the summary
+    # entirely; another has a sent-pending invitation and keeps its
+    # heading and line as usual.
+    await _add_user(db_session, "MDB230", "Testowa Anna", telegram_id=910230)
+    await _add_user(db_session, "MDB231", "Testowy Karol")
+    await _add_user(db_session, "MDB232", "Testowa Ola")
+    await _add_tournament(db_session, "mdb-t230", _FAR_FUTURE, venue_city="Radom")
+    await _add_tournament(db_session, "mdb-t231", _FAR_FUTURE + timedelta(days=1), venue_city="Łódź")
+    await _add_invitation(db_session, "MDB231", "MDB230", "mdb-t230", InvitationState.PENDING)
+    await _add_invitation(db_session, "MDB230", "MDB232", "mdb-t231", InvitationState.PENDING)
+
+    message = _make_message(910230)
+    await handle_moje_deble_command(message, db_session)
+
+    texts = _texts(message)
+    summary_text = texts[0]
+    assert "Radom" not in summary_text
+    assert "Karol Testowy" not in summary_text
+    assert "Łódź" in summary_text
+    assert "Ola Testowa — wysłane" in summary_text
+
+
+async def test_summary_message_skipped_when_everything_is_still_open_received(db_session: AsyncSession):
+    # CLAUDE.md: "If omitting them leaves the summary with no groups at
+    # all, the summary message must not be sent" -- this player has
+    # nothing but two still-open received invitations, so no summary
+    # message goes out, only the two follow-ups.
+    await _add_user(db_session, "MDB240", "Testowa Anna", telegram_id=910240)
+    await _add_user(db_session, "MDB241", "Testowy Karol")
+    await _add_user(db_session, "MDB242", "Testowa Ola")
+    await _add_tournament(db_session, "mdb-t240", _FAR_FUTURE, venue_city="Radom")
+    await _add_tournament(db_session, "mdb-t241", _FAR_FUTURE + timedelta(days=1), venue_city="Łódź")
+    await _add_invitation(db_session, "MDB241", "MDB240", "mdb-t240", InvitationState.PENDING)
+    await _add_invitation(db_session, "MDB242", "MDB240", "mdb-t241", InvitationState.PENDING)
+
+    message = _make_message(910240)
+    await handle_moje_deble_command(message, db_session)
+
+    texts = _texts(message)
+    assert "Moje deble" not in texts
+    assert len(texts) == 2
+    assert {texts[0], texts[1]} == {"🟠 Karol Testowy — zaprasza", "🟠 Ola Testowa — zaprasza"}
+    for markup in _markups(message):
+        assert len(_button_texts(markup)) == 3

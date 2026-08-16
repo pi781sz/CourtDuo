@@ -81,6 +81,7 @@
     "delivery_failed": "Nie udało się dostarczyć zaproszenia do {name}. Wpisz imię i nazwisko innej osoby.",
     "already_invited_by_invitee": "Masz już zaproszenie od {name} na ten turniej. Sprawdź „Moje deble”, aby odpowiedzieć.",
     "cancel_button": "Anuluj zaproszenie",
+    "cancel_named_button": "Anuluj: {name}",
     "cancelled_inviter": "Anulowano zaproszenie do {name} — {tournament}.",
     "cancelled_invitee": {
       "M": "{name} wycofał zaproszenie — {tournament}.",
