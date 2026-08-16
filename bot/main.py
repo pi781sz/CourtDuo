@@ -17,6 +17,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import BotCommand
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -30,9 +31,12 @@ from bot.handlers import (
     pending_external_invites_router,
     start_router,
     status_router,
+    support_router,
     tournament_search_router,
     viewers_router,
 )
+from bot.i18n import t
+from bot.lang import DEFAULT_LANG
 from bot.middlewares.db import DbSessionMiddleware
 from bot.middlewares.viewer_guard import ViewerActionGuardMiddleware
 from bot.staleness import register as register_staleness_alarm
@@ -41,6 +45,22 @@ load_dotenv()
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# The Telegram "/" command menu. One module-level constant -- (command,
+# locale key) pairs -- so adding another command later is a one-line
+# change. Only /start and /pomoc are listed here on purpose: /moje_deble,
+# /usun_konto and /podglad stay reachable as commands but out of the menu
+# (CLAUDE.md, "Operations" > "Support").
+BOT_COMMANDS: tuple[tuple[str, str], ...] = (
+    ("start", "commands.start"),
+    ("pomoc", "commands.pomoc"),
+)
+
+
+async def set_bot_commands(bot: Bot) -> None:
+    await bot.set_my_commands(
+        [BotCommand(command=command, description=t(key, DEFAULT_LANG)) for command, key in BOT_COMMANDS]
+    )
 
 
 def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispatcher:
@@ -78,6 +98,11 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     dispatcher.include_router(moje_deble_router)
     dispatcher.include_router(invite_friend_router)
     dispatcher.include_router(viewers_router)
+    # support_router carries /pomoc's message-state handler alongside these
+    # -- CLAUDE.md "Operations" > "Support": a persistent-reply-keyboard tap
+    # must still win against the support FSM state, exactly as it already
+    # must against every other mid-flow state.
+    dispatcher.include_router(support_router)
     dispatcher.include_router(start_router)
     dispatcher.include_router(tournament_search_router)
     dispatcher.include_router(partner_selection_router)
@@ -100,6 +125,7 @@ async def main() -> None:
     dispatcher = build_dispatcher()
 
     try:
+        await set_bot_commands(bot)
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(bot)
     finally:

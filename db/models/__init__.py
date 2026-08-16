@@ -25,6 +25,7 @@ from .invitations import Invitation, PendingExternalInvite
 from .players import Player
 from .rankings import Ranking
 from .scraper_runs import ScraperRun
+from .support_threads import SupportThread
 from .tournaments import Event, Tournament
 
 __all__ = [
@@ -41,6 +42,7 @@ __all__ = [
     "ScraperRun",
     "AlarmState",
     "BlockedPztId",
+    "SupportThread",
     "AgeCategory",
     "Gender",
     "InvitationState",

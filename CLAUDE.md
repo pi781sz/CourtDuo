@@ -570,15 +570,39 @@ The alarm's message text is operator-facing English, hardcoded in `bot.staleness
 
 **`/status`**, operator-only and gated on the same `ALARM_TELEGRAM_IDS`: plain text, no buttons, no reply keyboard, showing each scraper's last successful run and how long ago, its last run and outcome, and whether it is currently inside its threshold. Registered first in `bot.main` so no other router can intercept it. To anybody not on that list it does nothing at all — no reply, no error — a child typing it sees exactly what they'd see typing any other unknown command.
 
+**The Telegram "/" command menu.** Set programmatically in `bot.main` (`set_bot_commands`, called on startup before polling begins) rather than left to whatever was configured by hand in BotFather. `BOT_COMMANDS`, a module-level constant pairing each command name with its `locales/pl.json` description key, is the only thing that needs to change to add another entry later. Exactly two commands are listed: `/start` and `/pomoc` (see "Support" immediately below). `/moje_deble`, `/usun_konto` and `/podglad` all keep working as typed commands — they're just not in the menu, the same "reachable without needing a button of its own" pattern `/status` already established.
+
+**Support.** `/pomoc` is a two-way relay between a player and the operators in `ALARM_TELEGRAM_IDS` — the same list the staleness alarm and `/status` already read via `alarm_recipients()`. Non-negotiable rule 1 above forbids free-text messaging, but that rule is about messaging *between players*: no player's typed words ever reach another player, and no player can address anyone but an operator through it. This is the one place in CourtDuo where a player types free text, and it stays exactly that narrow — one player to the operators, one operator's reply back to that same one player, never routed sideways to anyone else.
+
+- Works whether or not the Telegram account has an `Account` row — no gate on registration. The single most likely support message is "I could not register," sent by someone who by definition has no account yet.
+- `/pomoc` prompts once (`support.prompt`) and sets an FSM state, `bot.states.Support.waiting_message`. The next text message in that state is relayed to every id in `alarm_recipients()`, one DM each, then the state clears — one message per `/pomoc`. Non-text content (photo, sticker, voice, document, anything) is refused (`support.non_text_refusal`) and never relayed in either direction; the state stays set so the player can simply try again with text instead of having to retype `/pomoc`.
+- Capped at 5 messages per hour per Telegram account, reusing the shape of `bot.attempt_limiter.FailedAttemptLimiter` as its own separate instance — never sharing the registration limiter's counters. Same "one process per bot instance, in-memory counter is fine" reasoning as everywhere else that class is used; over the cap, the player is told (`support.rate_limited`) and nothing is relayed.
+- An operator answers with Telegram's own native reply on the DM they received, never by typing a fresh message. The bot looks up which player that specific delivered copy belongs to (`support_threads`, below) and relays the reply back to that one player only, prefixed with a fixed heading (`support.reply_header`, exactly "CourtDuo Pomoc"). Only an id in `alarm_recipients()` may do this at all — a reply-to from anyone else produces no outbound message and no reply of any kind, the same "invisible, not merely locked" discipline `/status` and `/podglad` already use for a non-operator. If the replied-to message doesn't map to anything (too old, or a row that was never written), the operator is told plainly instead — never a silent no-op, and never a guessed recipient.
+- `support_threads` holds one row per (operator, delivered message) — a message relayed to three operators writes three rows, so whichever one actually answers still routes back to the right player:
+
+  ```
+  support_threads
+    id                   integer primary key
+    operator_chat_id     bigint not null
+    operator_message_id  bigint not null
+    user_telegram_id     bigint not null
+    created_at           timestamptz not null
+    unique (operator_chat_id, operator_message_id)
+  ```
+
+  Deliberately holds no message body, in either direction — this table only ever answers "which player does this operator's message belong to"; Telegram already holds the actual conversation, and CourtDuo has no reason to keep a second, stored copy of a child's words. Must be a table, not an in-memory dict, for the same reason `alarm_state` is one: the bot runs under `Restart=always` and the `Dispatcher` uses `MemoryStorage`, so anything kept only in memory would break every reply across a restart.
+- Operator-facing text (who a message is from, the no-mapping notice) is hardcoded English, exactly like the rest of this "Operations" section — the same narrow, deliberate exception to "never hardcode user-facing strings" above, for the same reason: it never reaches a player. Every player-facing string lives under `support.*` in `locales/pl.json`, through `t()`, same as anywhere else in the bot.
+- Not on the persistent reply keyboard, and no FAQ or submenu of any kind — `/pomoc` is a command and a "/" menu entry only, reachable the same way `/status` and `/podglad` are reachable without a button of their own.
+
 ---
 
 ## Build order
 
-Thirteen steps are built, merged, deployed and tested end-to-end against live PZT
+Fourteen steps are built, merged, deployed and tested end-to-end against live PZT
 data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.8, 10.1–10.2, 12.1–12.2) were
 corrections and refinements found by live testing; their behaviour is documented
 in the relevant sections above, which are the authoritative description. Steps
-11, 12 and 13 were added after the original ten, once real users became imminent
+11, 12, 13 and 14 were added after the original ten, once real users became imminent
 rather than being part of the initial plan — see "Operations" and "Account
 deletion and blocking" for their authoritative descriptions.
 
@@ -595,6 +619,7 @@ deletion and blocking" for their authoritative descriptions.
 11. ~~Staleness alarm and `/status`~~ **done**
 12. ~~Account deletion and blocking~~ **done**
 13. ~~Scrapers onto systemd timers, with logrotate~~ **done**
+14. ~~Telegram "/" command menu and `/pomoc` support relay~~ **done**
 
 ## Not yet built
 

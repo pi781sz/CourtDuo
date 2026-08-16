@@ -51,6 +51,7 @@ from .models import (
     Ranking,
     RankingList,
     ScraperRun,
+    SupportThread,
     Tournament,
     ViewerInviteToken,
 )
@@ -1102,3 +1103,36 @@ async def set_alarm_state(session: AsyncSession, key: str, firing: bool, last_se
         select(AlarmState).where(AlarmState.key == key).execution_options(populate_existing=True)
     )
     return result.scalar_one()
+
+
+async def create_support_thread(
+    session: AsyncSession, operator_chat_id: int, operator_message_id: int, user_telegram_id: int
+) -> SupportThread:
+    """One row per (operator, delivered message) -- CLAUDE.md "Operations"
+    > "Support". Called once per recipient in `alarm_recipients()` for
+    every relayed /pomoc message, so whichever operator replies routes
+    back to the right user.
+    """
+    row = SupportThread(
+        operator_chat_id=operator_chat_id,
+        operator_message_id=operator_message_id,
+        user_telegram_id=user_telegram_id,
+    )
+    session.add(row)
+    await session.flush()
+    return row
+
+
+async def get_support_thread(session: AsyncSession, operator_chat_id: int, operator_message_id: int) -> SupportThread | None:
+    """Looks up which user an operator's reply-to message belongs to.
+    Returns None for an unmapped message (too old, never written, or the
+    reply-to came from a chat/message pair this table never saw) so the
+    caller can tell the operator plainly rather than guessing a recipient.
+    """
+    result = await session.execute(
+        select(SupportThread).where(
+            SupportThread.operator_chat_id == operator_chat_id,
+            SupportThread.operator_message_id == operator_message_id,
+        )
+    )
+    return result.scalar_one_or_none()
