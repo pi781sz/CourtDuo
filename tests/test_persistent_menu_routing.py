@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.main import build_dispatcher
 from bot.states import PartnerSelection, TournamentSearch
+from db import crud
 from db.models import Account, AgeCategory, Player, Tournament
 
 _TOKEN = "123456:ABCDEF1234567890abcdef1234567890ABC"
@@ -65,6 +66,26 @@ def _make_update(telegram_id: int, text: str, update_id: int) -> Update:
     chat = Chat(id=telegram_id, type="private")
     user = User(id=telegram_id, is_bot=False, first_name="Test")
     message = Message(message_id=update_id, date=datetime.now(timezone.utc), chat=chat, from_user=user, text=text)
+    return Update(update_id=update_id, message=message)
+
+
+def _make_reply_update(telegram_id: int, text: str, reply_to_message_id: int, update_id: int) -> Update:
+    """A native Telegram "reply" to an earlier message in `telegram_id`'s
+    own DM with the bot -- what bot.handlers.support's operator-reply
+    handler filters on."""
+    chat = Chat(id=telegram_id, type="private")
+    user = User(id=telegram_id, is_bot=False, first_name="Test")
+    original = Message(
+        message_id=reply_to_message_id, date=datetime.now(timezone.utc), chat=chat, from_user=user, text="original"
+    )
+    message = Message(
+        message_id=update_id,
+        date=datetime.now(timezone.utc),
+        chat=chat,
+        from_user=user,
+        text=text,
+        reply_to_message=original,
+    )
     return Update(update_id=update_id, message=message)
 
 
@@ -188,4 +209,54 @@ async def test_a_typed_partner_name_is_not_swallowed_by_the_menu_handlers(
 
     # Reaches bot.handlers.partner_selection.handle_partner_name for real
     # (no such player in an empty roster -- "not found", not a menu reply).
+    assert _sent_texts(bot) == ["Nie znaleziono takiego zawodnika. Sprawdź pisownię i spróbuj ponownie."]
+
+
+async def test_operator_reply_gate_ignores_a_reply_to_from_a_non_operator(
+    db_sessionmaker: async_sessionmaker[AsyncSession], monkeypatch,
+):
+    """CLAUDE.md, "Operations" > "Support", invariant 5: a reply-to from a
+    Telegram id not in alarm_recipients() produces no outbound message at
+    all -- even when a real support_threads mapping exists for that exact
+    message, proving the gate is enforced before the lookup is ever used,
+    not merely that an unmapped lookup fails closed.
+    """
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "800001")  # the sender below is a different id
+    _session_factory.current = db_sessionmaker
+    sender_id = 800002
+    watched_user_id = 800003
+    async with db_sessionmaker() as session:
+        await crud.create_support_thread(session, sender_id, 42, watched_user_id)
+        await session.commit()
+
+    bot = _make_bot()
+    await _dispatcher.feed_update(bot, _make_reply_update(sender_id, "spróbuję odpowiedzieć", 42, update_id=1))
+
+    assert _sent_texts(bot) == []
+
+
+async def test_a_reply_swipe_from_an_ordinary_player_still_reaches_partner_selection(
+    db_sessionmaker: async_sessionmaker[AsyncSession], monkeypatch,
+):
+    """A player using Telegram's native "reply" gesture on an earlier bot
+    message (rather than typing a fresh one) must not be swallowed by the
+    operator-reply gate -- the gate only ever engages for a sender in
+    ALARM_TELEGRAM_IDS (CLAUDE.md, "Operations" > "Support")."""
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "800001")
+    _session_factory.current = db_sessionmaker
+    telegram_id = 700005  # not an operator
+    async with db_sessionmaker() as session:
+        await _add_account(session, telegram_id, "RTE0005", "Testowy Gracz")
+        session.add(Tournament(guid="route-t2", name="Turniej testowy", age_category=AgeCategory.MLODZICY))
+        await session.commit()
+
+    bot = _make_bot()
+    key = StorageKey(bot_id=bot.id, chat_id=telegram_id, user_id=telegram_id)
+    await _dispatcher.storage.set_state(key, PartnerSelection.waiting_name.state)
+    await _dispatcher.storage.set_data(key, {"tournament_guid": "route-t2"})
+
+    await _dispatcher.feed_update(
+        bot, _make_reply_update(telegram_id, "Jan Kowalski", reply_to_message_id=999, update_id=1)
+    )
+
     assert _sent_texts(bot) == ["Nie znaleziono takiego zawodnika. Sprawdź pisownię i spróbuj ponownie."]

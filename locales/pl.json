@@ -1,7 +1,8 @@
 {
   "commands": {
     "start": "Zacznij",
-    "moje_deble": "Moje deble"
+    "moje_deble": "Moje deble",
+    "pomoc": "Pomoc"
   },
   "start": {
     "greeting": "Cześć! 🎾 CourtDuo pomoże Ci znaleźć partnera do debla.",
@@ -211,5 +212,12 @@
       "M": "Zwolniłeś parę na turnieju {tournament}. Możesz teraz zaprosić inną osobę.",
       "W": "Zwolniłaś parę na turnieju {tournament}. Możesz teraz zaprosić inną osobę."
     }
+  },
+  "support": {
+    "prompt": "Napisz swoje pytanie w jednej wiadomości. Odpowiemy tutaj, na Telegramie.",
+    "confirmation": "Wiadomość została wysłana. Odpowiedź otrzymasz tutaj, na Telegramie.",
+    "non_text_refusal": "Możemy przyjąć tylko wiadomość tekstową. Napisz swoje pytanie jako tekst.",
+    "rate_limited": "Zbyt wiele wiadomości. Spróbuj ponownie za godzinę.",
+    "reply_header": "CourtDuo Pomoc"
   }
 }
