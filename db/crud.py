@@ -1201,9 +1201,11 @@ async def open_operator_session(
     session: AsyncSession, operator_telegram_id: int, user_telegram_id: int, now: datetime
 ) -> SupportOperatorSession:
     """Tapping "Reply: {name}" on an incoming support message, or the same
-    button reused as "reopen" after expiry -- either way, upserts the one
-    row this operator may hold onto whichever player it now names."""
-    values = {"user_telegram_id": user_telegram_id, "last_activity_at": now}
+    button reused as "reopen" after expiry or after a SUSPENDED session --
+    either way, upserts the one row this operator may hold onto whichever
+    player it now names, and always lands back in state='open': this is
+    the one place a session becomes (or resumes being) deliverable."""
+    values = {"user_telegram_id": user_telegram_id, "last_activity_at": now, "state": "open"}
     stmt = insert(SupportOperatorSession).values(operator_telegram_id=operator_telegram_id, **values)
     stmt = stmt.on_conflict_do_update(index_elements=[SupportOperatorSession.operator_telegram_id], set_=values)
     await session.execute(stmt)
@@ -1231,3 +1233,32 @@ async def close_operator_session(session: AsyncSession, operator_telegram_id: in
     await session.execute(
         delete(SupportOperatorSession).where(SupportOperatorSession.operator_telegram_id == operator_telegram_id)
     )
+
+
+async def suspend_other_operator_sessions(session: AsyncSession, telegram_id: int) -> None:
+    """CLAUDE.md, "Operations" > "Support", "A SUSPENDED SESSION, FAILING
+    CLOSED": the moment a player's message is actually relayed, every
+    *other* operator session that is currently effectively open (state
+    'open' or NULL, i.e. a row written before this column existed) and
+    named someone other than this sender flips to 'suspended' -- fail
+    closed rather than let a stale target silently receive whatever that
+    operator types next. Their own `user_telegram_id` is left untouched,
+    since a suspended session still has to remember who it was with."""
+    await session.execute(
+        update(SupportOperatorSession)
+        .where(
+            SupportOperatorSession.user_telegram_id != telegram_id,
+            or_(SupportOperatorSession.state.is_(None), SupportOperatorSession.state == "open"),
+        )
+        .values(state="suspended")
+    )
+
+
+async def list_open_support_conversations(session: AsyncSession) -> list[SupportConversation]:
+    """Every player currently `is_open` -- the caller (bot.middlewares.
+    support_conversation) still has to apply the 30-minute idle window
+    itself before treating one as genuinely "waiting", same as
+    get_support_conversation. Used to name the "waiting players" a
+    SUSPENDED operator session must choose between."""
+    result = await session.execute(select(SupportConversation).where(SupportConversation.is_open.is_(True)))
+    return list(result.scalars().all())

@@ -9,7 +9,8 @@ of how it was broken:
   2. An operator's message is delivered only to the player named by their
      own open session -- never any other player.
   3. An incoming message from a second player never changes which
-     conversation an operator has open.
+     conversation an operator has open -- it SUSPENDS it instead (see
+     invariants 8-10 below).
   4. An expired conversation or session never delivers a message, on
      either side.
   5. No non-text content is relayed in either direction.
@@ -18,6 +19,18 @@ of how it was broken:
      untouched (closing a player's own open conversation silently on the
      way), regardless of what is open -- this is what keeps /status and
      every other router's own priority unchanged.
+  8. A message from a second player always suspends the operator's
+     session (on top of invariant 3: the target name doesn't change, but
+     delivery stops until the operator picks again).
+  9. A suspended session delivers NOTHING to any player, whatever the
+     operator types, until a "Reply: {name}" button is tapped.
+  10. A message typed while suspended is never delivered later, to anyone
+      -- tapping "Reply:" resumes the session but does not flush anything
+      held.
+  11. A player never receives an automatic confirmation of their own
+      message -- the operator's reply is the next thing they see.
+  12. Every delivered operator message produces exactly one receipt to
+      that operator naming the recipient.
 
 Needs a real Postgres -- see tests/conftest.py, skipped cleanly when
 TEST_DATABASE_URL is unset. Invented telegram ids/names/pzt_ids only --
@@ -31,10 +44,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from aiogram.enums import ContentType
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.types import Message
 from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from bot.handlers.support import handle_support_reply_tap
+from bot.keyboards.support import SupportReplyCallback
 from bot.middlewares.support_conversation import (
     OPERATOR_SESSION_TTL,
     PLAYER_CONVERSATION_TTL,
@@ -113,7 +129,10 @@ async def test_player_relay_reaches_only_configured_operators(
     handler.assert_not_awaited()
     recipients = {call.args[0] for call in bot.send_message.await_args_list}
     assert recipients == {811111, 822222}
-    message.answer.assert_awaited_once_with(t("support.confirmation", _LANG))
+    # FIX 1: no automatic confirmation to the player any more -- the
+    # conversation-opened message already told them their answer arrives
+    # here.
+    message.answer.assert_not_awaited()
 
 
 async def test_player_relay_is_silent_when_no_operators_are_configured(
@@ -158,7 +177,7 @@ async def test_operator_relay_reaches_only_the_player_named_by_their_own_session
     assert delivered_text.startswith(t("support.reply_header", _LANG))
 
 
-# ---- invariant 3: a second player's message never redirects an open operator session ----
+# ---- invariant 3 & 8: a second player's message never redirects an open operator session, but does suspend it ----
 
 
 async def test_a_second_players_message_does_not_change_the_operators_open_session(
@@ -180,6 +199,32 @@ async def test_a_second_players_message_does_not_change_the_operators_open_sessi
         session_row = await crud.get_operator_session(session, operator_id)
         assert session_row is not None
         assert session_row.user_telegram_id == user_a
+        # FIX 2: the target never silently changes -- but the session is
+        # no longer safe to deliver through until the operator re-picks.
+        assert session_row.state == "suspended"
+
+
+async def test_a_message_from_the_operators_own_current_player_does_not_suspend(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    """The no-auto-switch rule cuts both ways: a session must not be
+    suspended by more messages from the exact player it's already open
+    with."""
+    operator_id = 844445
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    user_a = 900022
+    async with db_sessionmaker() as session:
+        await crud.open_operator_session(session, operator_id, user_a, _NOW)
+        await crud.open_support_conversation(session, user_a, _NOW)
+        await session.commit()
+
+    bot = _make_bot()
+    message = _make_message(user_a, "kolejna wiadomosc od tej samej osoby")
+    await _run(middleware, message, bot)
+
+    async with db_sessionmaker() as session:
+        session_row = await crud.get_operator_session(session, operator_id)
+        assert session_row.state == "open"
 
 
 # ---- invariant 4: expiry never delivers ----
@@ -313,6 +358,7 @@ async def test_no_message_body_is_ever_written_to_the_database(
             "operator_telegram_id",
             "user_telegram_id",
             "last_activity_at",
+            "state",
         }
         threads = (await session.execute(select(SupportThread))).scalars().all()
         assert threads
@@ -485,3 +531,240 @@ async def test_player_relay_rate_cap_blocks_the_sixth_message_in_an_hour(
 
     assert bot.send_message.await_count == 5
     blocked_message.answer.assert_awaited_once_with(t("support.rate_limited", _LANG))
+
+
+# ---- helpers shared by the suspension / receipt tests below ----
+
+
+def _make_callback(telegram_id: int) -> MagicMock:
+    callback = MagicMock()
+    callback.from_user = MagicMock(id=telegram_id)
+    callback.answer = AsyncMock()
+    callback.message = MagicMock()
+    callback.message.answer = AsyncMock()
+    return callback
+
+
+# ---- reproduction of the reported bug ----
+#
+# Live testing: with an open conversation to player A, player B sent
+# /pomoc and a message. The operator then typed a reply intended for B,
+# and it was delivered to A.
+#
+# Reproducing it against the UNFIXED code (git stash the middleware/crud
+# changes and re-run just this test) shows outcome (a): B's message
+# correctly carried its own "Reply:" button, the operator's session
+# correctly stayed pointed at A, and the operator's plain-typed message
+# still went to A -- nothing stopped them from typing while the session
+# still named A. A design failure, not a routing bug: (b) and (c) are
+# both false. This test passes on the fixed code because the session is
+# now SUSPENDED the moment B's message arrives, so the operator's typed
+# reply is withheld rather than misdelivered.
+
+
+async def test_reported_bug_operator_reply_after_a_second_players_message_is_withheld_not_misdelivered(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 910001
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_a, player_b = 910010, 910011
+
+    async with db_sessionmaker() as session:
+        # Operator already tapped "Reply: A" -- an open session on A.
+        await crud.open_support_conversation(session, player_a, _NOW)
+        await crud.open_operator_session(session, operator_id, player_a, _NOW)
+        # B has an open conversation too (sent /pomoc already).
+        await crud.open_support_conversation(session, player_b, _NOW)
+        await session.commit()
+
+    bot = _make_bot()
+
+    # B sends a message.
+    b_message = _make_message(player_b, "Wiadomosc od B")
+    await _run(middleware, b_message, bot)
+
+    # B's own message carried its own "Reply:" button, unconditionally.
+    b_deliveries = [c for c in bot.send_message.await_args_list if c.args[0] == operator_id]
+    assert len(b_deliveries) == 1
+    assert b_deliveries[0].kwargs.get("reply_markup") is not None
+    bot.send_message.reset_mock()
+
+    # The operator's session still names A -- no silent redirect.
+    async with db_sessionmaker() as session:
+        op_session = await crud.get_operator_session(session, operator_id)
+        assert op_session.user_telegram_id == player_a
+        assert op_session.state == "suspended"
+
+    # The operator, unaware, types a reply meant for B.
+    op_message = _make_message(operator_id, "Odpowiedz dla B")
+    await _run(middleware, op_message, bot)
+
+    # It must NOT be delivered to A (the old bug) -- and must not be
+    # delivered to B either, since the operator never said so explicitly.
+    bot.send_message.assert_not_awaited()
+
+
+# ---- invariant 9: a suspended session delivers nothing, whatever is typed ----
+
+
+async def test_suspended_session_delivers_nothing_regardless_of_what_the_operator_types(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 920001
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_a, player_b = 920010, 920011
+    async with db_sessionmaker() as session:
+        await crud.open_operator_session(session, operator_id, player_a, _NOW)
+        await crud.open_support_conversation(session, player_b, _NOW)
+        await session.commit()
+
+    bot = _make_bot()
+    # B's message suspends the operator's session.
+    await _run(middleware, _make_message(player_b, "halo"), bot)
+    bot.send_message.reset_mock()
+
+    for text in ("pierwsza proba", "druga proba", "trzecia proba"):
+        await _run(middleware, _make_message(operator_id, text), bot)
+
+    bot.send_message.assert_not_awaited()
+
+    async with db_sessionmaker() as session:
+        op_session = await crud.get_operator_session(session, operator_id)
+        assert op_session.state == "suspended"
+        assert op_session.user_telegram_id == player_a
+
+
+async def test_suspended_session_offers_a_reply_button_per_waiting_player(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 920020
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_a, player_b = 920030, 920031
+    async with db_sessionmaker() as session:
+        await _add_account(session, "SUP2003", player_a, "Nowak Amelia")
+        await _add_account(session, "SUP2004", player_b, "Kowalski Piotr")
+        await crud.open_operator_session(session, operator_id, player_a, _NOW)
+        await crud.open_support_conversation(session, player_a, _NOW)
+        await crud.open_support_conversation(session, player_b, _NOW)
+        await session.commit()
+
+    bot = _make_bot()
+    await _run(middleware, _make_message(player_b, "halo"), bot)
+
+    suspended_message = _make_message(operator_id, "kto to jest?")
+    await _run(middleware, suspended_message, bot)
+
+    suspended_message.answer.assert_awaited_once()
+    _, kwargs = suspended_message.answer.await_args
+    keyboard = kwargs["reply_markup"]
+    labels = {button.text for row in keyboard.inline_keyboard for button in row}
+    assert labels == {"Reply: Amelia Nowak", "Reply: Piotr Kowalski"}
+
+
+# ---- invariant 10: nothing typed while suspended is ever delivered later ----
+
+
+async def test_message_typed_while_suspended_is_never_delivered_after_resuming(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 930001
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_a, player_b = 930010, 930011
+    async with db_sessionmaker() as session:
+        await crud.open_operator_session(session, operator_id, player_a, _NOW)
+        await crud.open_support_conversation(session, player_b, _NOW)
+        await session.commit()
+
+    bot = _make_bot()
+    await _run(middleware, _make_message(player_b, "halo"), bot)
+    bot.send_message.reset_mock()
+
+    # Typed while suspended -- held, not delivered.
+    await _run(middleware, _make_message(operator_id, "wiadomosc napisana w zawieszeniu"), bot)
+    bot.send_message.assert_not_awaited()
+
+    # The operator taps "Reply: B" to resume.
+    async with db_sessionmaker() as session:
+        callback = _make_callback(operator_id)
+        callback_data = SupportReplyCallback(user_telegram_id=player_b)
+        await handle_support_reply_tap(callback, callback_data, session)
+        await session.commit()
+
+    async with db_sessionmaker() as session:
+        op_session = await crud.get_operator_session(session, operator_id)
+        assert op_session.state == "open"
+        assert op_session.user_telegram_id == player_b
+
+    # Resuming never retroactively delivers the held message.
+    bot.send_message.assert_not_awaited()
+
+    # The operator has to retype -- only the fresh message is delivered.
+    await _run(middleware, _make_message(operator_id, "nowa wiadomosc dla B"), bot)
+    bot.send_message.assert_awaited_once()
+    assert bot.send_message.await_args_list[0].args[0] == player_b
+    delivered_text = bot.send_message.await_args_list[0].args[1]
+    assert "nowa wiadomosc dla B" in delivered_text
+    assert "wiadomosc napisana w zawieszeniu" not in delivered_text
+
+
+# ---- invariant 11: no automatic confirmation to the player ----
+
+
+async def test_player_never_gets_an_automatic_confirmation_of_their_own_message(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "940001")
+    telegram_id = 940002
+    async with db_sessionmaker() as session:
+        await crud.open_support_conversation(session, telegram_id, _NOW)
+        await session.commit()
+
+    bot = _make_bot()
+    message = _make_message(telegram_id, "czy to dziala?")
+    await _run(middleware, message, bot)
+
+    message.answer.assert_not_awaited()
+
+
+# ---- invariant 12: exactly one delivery receipt per delivered operator message ----
+
+
+async def test_operator_gets_exactly_one_receipt_naming_the_recipient(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 950001
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_id = 950010
+    async with db_sessionmaker() as session:
+        await _add_account(session, "SUP5001", player_id, "Szewczyk Jagoda")
+        await crud.open_operator_session(session, operator_id, player_id, _NOW)
+        await session.commit()
+
+    bot = _make_bot()
+    message = _make_message(operator_id, "Sprobuj ponownie za godzine")
+    await _run(middleware, message, bot)
+
+    bot.send_message.assert_awaited_once()
+    message.answer.assert_awaited_once_with("Sent to Jagoda Szewczyk.")
+
+
+async def test_no_receipt_when_nothing_was_actually_delivered(
+    db_sessionmaker: async_sessionmaker[AsyncSession], middleware, monkeypatch: pytest.MonkeyPatch
+):
+    """A suspended session (invariant 9) is the main case, covered above --
+    this checks the delivery-failure path too: push() returning None must
+    not produce a false "Sent to" receipt."""
+    operator_id = 950020
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_id = 950021
+    async with db_sessionmaker() as session:
+        await crud.open_operator_session(session, operator_id, player_id, _NOW)
+        await session.commit()
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock(side_effect=TelegramForbiddenError(MagicMock(), "blocked"))
+
+    message = _make_message(operator_id, "wiadomosc")
+    await _run(middleware, message, bot)
+
+    message.answer.assert_not_awaited()

@@ -42,3 +42,18 @@ def support_close_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Close conversation", callback_data=SupportCloseCallback())
     builder.adjust(1)
     return builder.as_markup()
+
+
+def support_suspended_keyboard(waiting_players: list[tuple[int, str]]) -> InlineKeyboardMarkup:
+    """CLAUDE.md, "A SUSPENDED SESSION, FAILING CLOSED": one "Reply: {name}"
+    button per player currently waiting, reusing the exact same
+    SupportReplyCallback a fresh incoming message's own button uses --
+    tapping either does the same thing, open (or reopen) this operator's
+    session named for that one player."""
+    builder = InlineKeyboardBuilder()
+    for user_telegram_id, name in waiting_players:
+        builder.button(
+            text=f"Reply: {name}", callback_data=SupportReplyCallback(user_telegram_id=user_telegram_id)
+        )
+    builder.adjust(1)
+    return builder.as_markup()
