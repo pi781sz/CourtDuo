@@ -18,11 +18,20 @@ three-button keyboard (bot.keyboards.invitations.invitation_answer_keyboard)
 unchanged, wired to the exact same handlers
 (bot.handlers.invitations.handle_accept/handle_reject/handle_not_attending).
 
-Step 8.6: a pending *sent* invitation gets the same treatment, one
-follow-up message per invitation, but with a single "Anuluj zaproszenie"
-button (bot.keyboards.invitations.cancel_invitation_keyboard) instead --
-only the sender may withdraw it, so a received invitation never gets this
-button and a sent one never gets the three answer buttons.
+Step 8.6 gave a pending *sent* invitation the same follow-up-message
+treatment, with a single "Anuluj zaproszenie" button instead of the three
+answers -- only the sender may withdraw it. This PR (no-duplicate-lines)
+removed that follow-up message: it only ever existed to have somewhere to
+hang the cancel button, and its entry_line() duplicated the line already
+sitting in the summary body -- the same bug step 12.1/12.2 had already
+fixed once for a stranded match's "Usuń" button. A still-open sent
+invitation's line now stays exactly where it already was, in the summary
+body, and its cancel button (bot.keyboards.invitations.CancelInvitationCallback,
+labelled with the partner's name) rides on the summary message's own
+keyboard instead (bot.keyboards.navigation.moje_deble_summary_keyboard).
+A still-open *received* invitation keeps its own follow-up message --
+three buttons don't fit unambiguously on a shared keyboard -- but is now
+left out of the summary body, so its line still only ever appears once.
 """
 
 from __future__ import annotations
@@ -39,7 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.viewers import render_moje_deble_for_viewer
 from bot.i18n import all_translations, t
-from bot.keyboards.invitations import cancel_invitation_keyboard, invitation_answer_keyboard
+from bot.keyboards.invitations import invitation_answer_keyboard
 from bot.keyboards.navigation import (
     MojeDebleCallback,
     moje_deble_summary_keyboard,
@@ -53,7 +62,9 @@ from bot.moje_deble import (
     pending_received_entries,
     pending_sent_entries,
     render_groups,
+    summary_groups,
 )
+from core.text import display_name
 from db import crud
 from db.models import Account
 
@@ -88,16 +99,32 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     # Step 12.1, PROBLEM 4: a stranded match's own "Usuń" button rides
     # along on this same keyboard -- its status line is already in `body`,
     # so it must not be repeated in a follow-up message just to have
-    # somewhere to hang the button. Step 12.2: no "Znajdź partnera" button
-    # here any more either, for the same reason as the empty state above --
-    # moje_deble_summary_keyboard returns None when there is nothing
-    # stranded to act on.
-    heading = t("moje_deble.heading", lang)
-    body = render_groups(groups, lang)
+    # somewhere to hang the button. This PR (no-duplicate-lines) applies
+    # the same fix to a still-open sent invitation's "Anuluj" button
+    # instead of its own follow-up message -- see moje_deble_summary_keyboard.
+    # Step 12.2: no "Znajdź partnera" button here any more either, for the
+    # same reason as the empty state above.
+    #
+    # summary_groups() also leaves out every still-open *received*
+    # invitation -- it gets its own follow-up message below instead, so
+    # its line must not also sit in this body (the bug this PR fixes).
+    # When that leaves nothing to summarise at all, no summary message is
+    # sent -- one below would otherwise carry a heading with nothing
+    # under it, or the misleading "you have nothing" wording while the
+    # follow-up messages right after it ask the player to act on
+    # something.
+    summary = summary_groups(groups)
     release_ids = [entry.invitation_id for entry in partner_deleted_entries(groups)]
-    await message.answer(
-        f"{heading}\n\n{body}", reply_markup=moje_deble_summary_keyboard(lang, release_ids)
-    )
+    cancel_entries = [
+        (entry.invitation_id, display_name(entry.other_full_name)) for entry in pending_sent_entries(groups)
+    ]
+    if summary:
+        heading = t("moje_deble.heading", lang)
+        body = render_groups(summary, lang)
+        await message.answer(
+            f"{heading}\n\n{body}",
+            reply_markup=moje_deble_summary_keyboard(lang, release_ids, cancel_entries),
+        )
 
     # One follow-up message per still-open received invitation, each with
     # its own answer keyboard, since a single summary message can't carry
@@ -106,13 +133,6 @@ async def _render_and_send(message: Message, session: AsyncSession, account: Acc
     for entry in pending_received_entries(groups):
         await message.answer(
             entry_line(entry, lang), reply_markup=invitation_answer_keyboard(entry.invitation_id, lang)
-        )
-    # CLAUDE.md step 8.6: the same treatment for a still-open sent
-    # invitation, but with the single cancel button instead -- the invitee
-    # answers, the inviter withdraws, never the other way round.
-    for entry in pending_sent_entries(groups):
-        await message.answer(
-            entry_line(entry, lang), reply_markup=cancel_invitation_keyboard(entry.invitation_id, lang)
         )
 
 

@@ -23,6 +23,7 @@ from bot.moje_deble import (
     pending_received_entries,
     pending_sent_entries,
     render_groups,
+    summary_groups,
     tournament_finished,
     visible_entries,
 )
@@ -479,3 +480,97 @@ def test_pending_sent_and_received_entries_never_overlap():
     assert sent_ids == {1}
     assert received_ids == {2}
     assert sent_ids.isdisjoint(received_ids)
+
+
+# --- summary_groups: no-duplicate-lines fix, still-open received omitted -------
+
+
+def test_summary_groups_omits_still_open_received_entries_but_keeps_the_rest():
+    # A group with one sent-pending and one received-pending entry: the
+    # received one is left out of the summary body (it gets its own
+    # follow-up message instead), but the group survives since the
+    # sent-pending entry is still there.
+    anna = _player("P170", "Testowa Anna")
+    karol = _player("P171", "Testowy Karol")
+    ola = _player("P172", "Testowa Ola")
+    tournament = _tournament("g170", date(2026, 8, 22))
+    invitations = [
+        _invitation(1, anna, karol, tournament, InvitationState.PENDING, _T0),
+        _invitation(2, ola, anna, tournament, InvitationState.PENDING, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P170", today=date(2026, 8, 1), lang=_LANG)
+    summary = summary_groups(groups)
+
+    assert len(summary) == 1
+    assert [entry.invitation_id for entry in summary[0].entries] == [1]
+
+
+def test_summary_groups_drops_a_group_whose_only_entry_is_received_pending():
+    # CLAUDE.md, "EMPTY GROUPS": omitting the received-pending entry here
+    # leaves nothing under the heading, so the whole group -- heading
+    # included -- must not appear in the summary at all.
+    anna = _player("P180", "Testowa Anna")
+    karol = _player("P181", "Testowy Karol")
+    tournament = _tournament("g180", date(2026, 8, 22))
+    invitations = [_invitation(1, karol, anna, tournament, InvitationState.PENDING, _T0)]
+
+    groups = group_by_tournament(invitations, "P180", today=date(2026, 8, 1), lang=_LANG)
+    summary = summary_groups(groups)
+
+    assert summary == []
+
+
+def test_summary_groups_keeps_other_groups_when_only_one_is_dropped():
+    # A mix across two tournaments: one has only a received-pending entry
+    # (dropped entirely), the other has a sent-pending entry (kept) -- the
+    # drop must be scoped to the empty group, not the whole summary.
+    anna = _player("P190", "Testowa Anna")
+    karol = _player("P191", "Testowy Karol")
+    ola = _player("P192", "Testowa Ola")
+    received_only = _tournament("g190a", date(2026, 8, 13))
+    sent_only = _tournament("g190b", date(2026, 8, 22))
+    invitations = [
+        _invitation(1, karol, anna, received_only, InvitationState.PENDING, _T0),
+        _invitation(2, anna, ola, sent_only, InvitationState.PENDING, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P190", today=date(2026, 8, 1), lang=_LANG)
+    summary = summary_groups(groups)
+
+    assert [group.tournament_guid for group in summary] == ["g190b"]
+
+
+def test_summary_groups_empty_when_every_group_is_only_received_pending():
+    # CLAUDE.md: "If omitting them leaves the summary with no groups at
+    # all" -- both tournaments here have nothing but a still-open received
+    # invitation, so the summary ends up with no groups whatsoever.
+    anna = _player("P200", "Testowa Anna")
+    karol = _player("P201", "Testowy Karol")
+    ola = _player("P202", "Testowa Ola")
+    t1 = _tournament("g200a", date(2026, 8, 13))
+    t2 = _tournament("g200b", date(2026, 8, 22))
+    invitations = [
+        _invitation(1, karol, anna, t1, InvitationState.PENDING, _T0),
+        _invitation(2, ola, anna, t2, InvitationState.PENDING, _T0),
+    ]
+
+    groups = group_by_tournament(invitations, "P200", today=date(2026, 8, 1), lang=_LANG)
+    summary = summary_groups(groups)
+
+    assert summary == []
+
+
+def test_summary_groups_never_drops_a_matched_or_stranded_entry():
+    # Matched (ACCEPTED) entries are untouched by this filter regardless
+    # of direction -- only PENDING+RECEIVED is ever omitted.
+    anna = _player("P210", "Testowa Anna")
+    jagoda = _player("P211", "Testowa Jagoda")
+    tournament = _tournament("g210", date(2026, 8, 22))
+    invitations = [_invitation(1, jagoda, anna, tournament, InvitationState.ACCEPTED, _T0)]
+
+    groups = group_by_tournament(invitations, "P210", today=date(2026, 8, 1), lang=_LANG)
+    summary = summary_groups(groups)
+
+    assert len(summary) == 1
+    assert [entry.invitation_id for entry in summary[0].entries] == [1]

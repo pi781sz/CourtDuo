@@ -255,6 +255,28 @@ def render_groups(groups: list[TournamentGroup], lang: str) -> str:
     return "\n\n".join(blocks)
 
 
+def _belongs_in_summary(entry: DebelEntry) -> bool:
+    """CLAUDE.md, "STILL-OPEN RECEIVED invitations": these get their own
+    follow-up message carrying the three answer buttons, so their line is
+    left out of the summary body -- otherwise the same line would appear
+    twice, once here and once in its own message."""
+    return not (entry.state is InvitationState.PENDING and entry.direction is Direction.RECEIVED)
+
+
+def summary_groups(groups: list[TournamentGroup]) -> list[TournamentGroup]:
+    """`groups`, as they belong in the summary message body: every
+    still-open received invitation is omitted (see _belongs_in_summary),
+    and CLAUDE.md's "EMPTY GROUPS" rule drops a tournament's heading
+    entirely when that omission leaves nothing under it -- a heading with
+    no lines is never rendered."""
+    result = []
+    for group in groups:
+        entries = [entry for entry in group.entries if _belongs_in_summary(entry)]
+        if entries:
+            result.append(TournamentGroup(tournament_guid=group.tournament_guid, header=group.header, entries=entries))
+    return result
+
+
 def pending_received_entries(groups: list[TournamentGroup]) -> list[DebelEntry]:
     """Every still-open received invitation across all groups, in render
     order -- what the Zatwierdź/Odrzuć/"Nie jadę na ten turniej" buttons

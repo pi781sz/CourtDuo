@@ -23,11 +23,15 @@ reply keyboard's own label, which live testing found sitting directly
 underneath it on screen at the same time. Neither function offers that
 button any more; bot.handlers.moje_deble sends no inline keyboard at all
 for the empty state, and moje_deble_summary_keyboard now carries only
-buttons that act on a specific entry (one "Usuń" per stranded match).
-FindPartnerCallback itself stays defined and handled
-(bot.handlers.navigation.handle_find_partner) purely so a message sent
-before this change, still carrying the old button, keeps working when
-tapped -- no keyboard in this codebase emits it any more.
+buttons that act on a specific entry (one "Usuń" per stranded match, one
+"Anuluj: {name}" per still-open sent invitation -- see its own docstring;
+the latter replaced a per-invitation follow-up message that existed only
+to hang the button on, the same duplicate-line bug this step's own
+"Usuń" button was written to avoid). FindPartnerCallback itself stays
+defined and handled (bot.handlers.navigation.handle_find_partner) purely
+so a message sent before this change, still carrying the old button,
+keeps working when tapped -- no keyboard in this codebase emits it any
+more.
 
 invitation_sent_keyboard (step 8.7) is the one exception that remains: the
 persistent reply keyboard can be collapsed by the player, and Telegram
@@ -60,7 +64,7 @@ from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
 
 from bot.i18n import t
-from bot.keyboards.invitations import ReleaseMatchCallback
+from bot.keyboards.invitations import CancelInvitationCallback, ReleaseMatchCallback
 
 
 class FindPartnerCallback(CallbackData, prefix="fpart"):
@@ -72,7 +76,9 @@ class MojeDebleCallback(CallbackData, prefix="mdeble"):
 
 
 def moje_deble_summary_keyboard(
-    lang: str, release_invitation_ids: list[int] | None = None
+    lang: str,
+    release_invitation_ids: list[int] | None = None,
+    cancel_entries: list[tuple[int, str]] | None = None,
 ) -> InlineKeyboardMarkup | None:
     """CLAUDE.md step 12.1, PROBLEM 4, pared back by step 12.2: one "Usuń"
     button per stranded match (a confirmed pairing whose partner deleted
@@ -81,18 +87,34 @@ def moje_deble_summary_keyboard(
     removed it -- it duplicated the persistent reply keyboard's own label,
     visible on screen at the same time as this one. Navigation lives on
     the persistent keyboard only; an inline keyboard here carries nothing
-    but buttons that act on this message's own specific entries. Returns
-    None -- "no inline keyboard" -- when there is nothing stranded to
-    act on.
+    but buttons that act on this message's own specific entries.
+
+    `cancel_entries` extends this the same way for a still-open *sent*
+    invitation (CLAUDE.md, "STILL-OPEN SENT invitations"): one
+    (invitation_id, display_name) pair per entry, one "Anuluj: {name}"
+    button each, reusing CancelInvitationCallback unchanged -- the
+    follow-up message this used to need just to hang the button on is
+    gone, same reasoning as the "Usuń" button above. The caller supplies
+    the already-display-ordered name (core.text.display_name) since this
+    module has no domain knowledge of DebelEntry.
+
+    Returns None -- "no inline keyboard" -- when there is nothing
+    stranded or still-open-sent to act on.
     """
     release_ids = list(release_invitation_ids or ())
-    if not release_ids:
+    cancels = list(cancel_entries or ())
+    if not release_ids and not cancels:
         return None
     builder = InlineKeyboardBuilder()
     for invitation_id in release_ids:
         builder.button(
             text=t("deletion.release_button", lang),
             callback_data=ReleaseMatchCallback(invitation_id=invitation_id),
+        )
+    for invitation_id, name in cancels:
+        builder.button(
+            text=t("invitation.cancel_named_button", lang, name=name),
+            callback_data=CancelInvitationCallback(invitation_id=invitation_id),
         )
     builder.adjust(1)
     return builder.as_markup()
