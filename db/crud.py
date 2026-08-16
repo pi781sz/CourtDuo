@@ -51,6 +51,8 @@ from .models import (
     Ranking,
     RankingList,
     ScraperRun,
+    SupportConversation,
+    SupportOperatorSession,
     SupportThread,
     Tournament,
     ViewerInviteToken,
@@ -1136,3 +1138,96 @@ async def get_support_thread(session: AsyncSession, operator_chat_id: int, opera
         )
     )
     return result.scalar_one_or_none()
+
+
+async def get_support_conversation(session: AsyncSession, user_telegram_id: int) -> SupportConversation | None:
+    """CLAUDE.md "Operations" > "Support": whether this player's plain text
+    right now should be relayed -- the caller (bot.middlewares.support_conversation)
+    still has to check `is_open` and the 30-minute idle window itself,
+    since a row can exist and simply be closed or stale."""
+    result = await session.execute(
+        select(SupportConversation).where(SupportConversation.user_telegram_id == user_telegram_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def open_support_conversation(session: AsyncSession, user_telegram_id: int, now: datetime) -> SupportConversation:
+    """/pomoc, and every silent reopen implied by it -- upserts is_open=True
+    with a fresh last_activity_at."""
+    values = {"is_open": True, "last_activity_at": now}
+    stmt = insert(SupportConversation).values(user_telegram_id=user_telegram_id, **values)
+    stmt = stmt.on_conflict_do_update(index_elements=[SupportConversation.user_telegram_id], set_=values)
+    await session.execute(stmt)
+    result = await session.execute(
+        select(SupportConversation)
+        .where(SupportConversation.user_telegram_id == user_telegram_id)
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one()
+
+
+async def touch_support_conversation(session: AsyncSession, user_telegram_id: int, now: datetime) -> None:
+    """Called after a message is actually relayed, so the 30-minute idle
+    window resets on real activity rather than freezing at the open."""
+    await session.execute(
+        update(SupportConversation)
+        .where(SupportConversation.user_telegram_id == user_telegram_id)
+        .values(last_activity_at=now)
+    )
+
+
+async def close_support_conversation(session: AsyncSession, user_telegram_id: int) -> None:
+    """A no-op when no row exists -- every caller (a command, a persistent-
+    keyboard label, expiry, the operator closing) may fire for a player who
+    never had a conversation open in the first place."""
+    await session.execute(
+        update(SupportConversation)
+        .where(SupportConversation.user_telegram_id == user_telegram_id)
+        .values(is_open=False)
+    )
+
+
+async def get_operator_session(session: AsyncSession, operator_telegram_id: int) -> SupportOperatorSession | None:
+    """A row's mere presence is what "this operator has a conversation
+    open" means -- the caller still has to check the 60-minute idle
+    window itself."""
+    result = await session.execute(
+        select(SupportOperatorSession).where(SupportOperatorSession.operator_telegram_id == operator_telegram_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def open_operator_session(
+    session: AsyncSession, operator_telegram_id: int, user_telegram_id: int, now: datetime
+) -> SupportOperatorSession:
+    """Tapping "Reply: {name}" on an incoming support message, or the same
+    button reused as "reopen" after expiry -- either way, upserts the one
+    row this operator may hold onto whichever player it now names."""
+    values = {"user_telegram_id": user_telegram_id, "last_activity_at": now}
+    stmt = insert(SupportOperatorSession).values(operator_telegram_id=operator_telegram_id, **values)
+    stmt = stmt.on_conflict_do_update(index_elements=[SupportOperatorSession.operator_telegram_id], set_=values)
+    await session.execute(stmt)
+    result = await session.execute(
+        select(SupportOperatorSession)
+        .where(SupportOperatorSession.operator_telegram_id == operator_telegram_id)
+        .execution_options(populate_existing=True)
+    )
+    return result.scalar_one()
+
+
+async def touch_operator_session(session: AsyncSession, operator_telegram_id: int, now: datetime) -> None:
+    await session.execute(
+        update(SupportOperatorSession)
+        .where(SupportOperatorSession.operator_telegram_id == operator_telegram_id)
+        .values(last_activity_at=now)
+    )
+
+
+async def close_operator_session(session: AsyncSession, operator_telegram_id: int) -> None:
+    """A no-op when no row exists. A row in this table is the only thing
+    that means "open" -- closing always deletes it rather than flipping a
+    flag, unlike support_conversations, which a player might reopen with
+    the same is_open column later."""
+    await session.execute(
+        delete(SupportOperatorSession).where(SupportOperatorSession.operator_telegram_id == operator_telegram_id)
+    )

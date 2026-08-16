@@ -1,20 +1,9 @@
-"""Tests for /pomoc, the two-way support relay between a player and the
-operators in bot.staleness.alarm_recipients() (CLAUDE.md, "Operations" >
-"Support"). Player <-> operator only, never player <-> player -- these
-tests are written as the invariants the task asked for, not as a list of
-cases, so a future change that breaks the promise fails loudly regardless
-of how it was broken:
-
-  1. A support message is never delivered to any Telegram id outside
-     alarm_recipients().
-  2. An operator reply is delivered only to the user_telegram_id recorded
-     for that exact (operator_chat_id, operator_message_id).
-  3. No non-text content is relayed in either direction.
-  4. No message body is ever written to the database.
-  5. A reply-to-message from a Telegram id not in alarm_recipients()
-     produces no outbound message at all -- covered end-to-end in
-     tests/test_persistent_menu_routing.py, which exercises the real
-     router/filter wiring rather than calling handlers directly.
+"""Tests for what's left in bot.handlers.support after the open-conversation
+rework (CLAUDE.md, "Operations" > "Support"): opening a conversation on
+/pomoc, the reply-to fallback (unchanged), and the two operator buttons
+("Reply: {name}" / "Close conversation"). The actual message relaying and
+lazy expiry now live in bot.middlewares.support_conversation -- see
+tests/test_support_conversation_middleware_db.py for those.
 
 Needs a real Postgres -- see tests/conftest.py, skipped cleanly when
 TEST_DATABASE_URL is unset. Invented telegram ids/names/pzt_ids only --
@@ -23,40 +12,30 @@ never a real PZT id (CLAUDE.md rule 4).
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from aiogram.enums import ContentType
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.storage.base import StorageKey
-from aiogram.fsm.storage.memory import MemoryStorage
-from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.handlers.support import (
     handle_operator_reply,
     handle_pomoc,
-    handle_pomoc_message,
-    handle_pomoc_non_text,
+    handle_support_close_tap,
+    handle_support_reply_tap,
 )
 from bot.i18n import t
-from bot.states import Support
+from bot.keyboards.support import SupportReplyCallback
 from db import crud
-from db.models import Account, Player, SupportThread
+from db.models import Account, Player
 
 _LANG = "pl"
 
 
-def _make_state(telegram_id: int) -> FSMContext:
-    key = StorageKey(bot_id=1, chat_id=telegram_id, user_id=telegram_id)
-    return FSMContext(storage=MemoryStorage(), key=key)
-
-
-def _make_message(telegram_id: int, text: str | None, content_type=ContentType.TEXT) -> MagicMock:
+def _make_message(telegram_id: int, text: str | None = None) -> MagicMock:
     message = MagicMock()
     message.from_user = MagicMock(id=telegram_id, full_name="Testowy Gracz")
     message.text = text
-    message.content_type = content_type
     message.answer = AsyncMock()
     return message
 
@@ -69,6 +48,15 @@ def _make_reply_message(chat_id: int, reply_to_message_id: int, text: str | None
     message.reply_to_message = MagicMock(message_id=reply_to_message_id)
     message.answer = AsyncMock()
     return message
+
+
+def _make_callback(telegram_id: int) -> MagicMock:
+    callback = MagicMock()
+    callback.from_user = MagicMock(id=telegram_id)
+    callback.answer = AsyncMock()
+    callback.message = MagicMock()
+    callback.message.answer = AsyncMock()
+    return callback
 
 
 _message_id_counter = iter(range(1, 1_000_000))
@@ -93,151 +81,36 @@ async def _add_account(session: AsyncSession, pzt_id: str, telegram_id: int, ful
     return account
 
 
-async def test_pomoc_prompts_and_sets_state_without_an_account(db_session: AsyncSession):
+async def test_pomoc_opens_a_conversation_without_an_account(db_session: AsyncSession):
     # CLAUDE.md, "Support": "the single most likely support message is 'I
     # could not register', from someone who by definition has no account."
-    message = _make_message(950001, text=None)
-    state = _make_state(950001)
+    message = _make_message(960001)
 
-    await handle_pomoc(message, state, db_session)
+    await handle_pomoc(message, db_session)
 
-    message.answer.assert_awaited_once_with(t("support.prompt", _LANG))
-    assert await state.get_state() == Support.waiting_message.state
-
-
-async def test_relay_reaches_every_alarm_recipient_and_no_one_else(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "111111,222222")
-    telegram_id = 950002
-    await _add_account(db_session, "SUP0002", telegram_id, "Kowalski Jan")
-
-    message = _make_message(telegram_id, text="Nie moge sie zarejestrowac")
-    state = _make_state(telegram_id)
-    await state.set_state(Support.waiting_message)
-    bot = _make_bot()
-
-    await handle_pomoc_message(message, state, db_session, bot)
-
-    recipients = {call.args[0] for call in bot.send_message.await_args_list}
-    assert recipients == {111111, 222222}
-    message.answer.assert_awaited_once_with(t("support.confirmation", _LANG))
-    assert await state.get_state() is None
+    message.answer.assert_awaited_once_with(t("support.conversation_opened", _LANG))
+    conversation = await crud.get_support_conversation(db_session, 960001)
+    assert conversation is not None
+    assert conversation.is_open is True
 
 
-async def test_relay_is_silent_when_no_operators_are_configured(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.delenv("ALARM_TELEGRAM_IDS", raising=False)
-    telegram_id = 950003
-    message = _make_message(telegram_id, text="Halo?")
-    state = _make_state(telegram_id)
-    await state.set_state(Support.waiting_message)
-    bot = _make_bot()
+async def test_pomoc_reopens_an_already_closed_conversation(db_session: AsyncSession):
+    telegram_id = 960002
+    await crud.open_support_conversation(db_session, telegram_id, datetime.now(timezone.utc))
+    await crud.close_support_conversation(db_session, telegram_id)
 
-    await handle_pomoc_message(message, state, db_session, bot)
+    await handle_pomoc(_make_message(telegram_id), db_session)
 
-    bot.send_message.assert_not_awaited()
-
-
-async def test_relay_names_a_registered_sender_and_marks_an_unregistered_one(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "333333")
-
-    registered_id = 950004
-    await _add_account(db_session, "SUP0004", registered_id, "Szewczyk Jagoda")
-    message = _make_message(registered_id, text="Pytanie")
-    state = _make_state(registered_id)
-    await state.set_state(Support.waiting_message)
-    bot = _make_bot()
-    await handle_pomoc_message(message, state, db_session, bot)
-    operator_text = bot.send_message.await_args_list[0].args[1]
-    assert "Jagoda Szewczyk" in operator_text
-    assert "SUP0004" in operator_text
-    assert str(registered_id) in operator_text
-
-    unregistered_id = 950005
-    message2 = _make_message(unregistered_id, text="Pytanie 2")
-    state2 = _make_state(unregistered_id)
-    await state2.set_state(Support.waiting_message)
-    bot2 = _make_bot()
-    await handle_pomoc_message(message2, state2, db_session, bot2)
-    operator_text2 = bot2.send_message.await_args_list[0].args[1]
-    assert "not registered" in operator_text2
-
-
-async def test_no_message_body_is_ever_written_to_the_database(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "444444")
-    telegram_id = 950006
-    secret = "a very specific support message body xyz123"
-    message = _make_message(telegram_id, text=secret)
-    state = _make_state(telegram_id)
-    await state.set_state(Support.waiting_message)
-    bot = _make_bot()
-
-    await handle_pomoc_message(message, state, db_session, bot)
-
-    # Structural guarantee: the table has no column that could hold a body.
-    columns = {c.name for c in inspect(SupportThread).columns}
-    assert columns == {"id", "operator_chat_id", "operator_message_id", "user_telegram_id", "created_at"}
-
-    # Defensive: whatever is actually stored never contains the message text.
-    rows = (await db_session.execute(select(SupportThread))).scalars().all()
-    assert rows
-    for row in rows:
-        values = [row.operator_chat_id, row.operator_message_id, row.user_telegram_id, str(row.created_at)]
-        assert all(secret not in str(v) for v in values)
-
-
-async def test_non_text_content_is_refused_and_state_stays_set(db_session: AsyncSession):
-    telegram_id = 950007
-    message = _make_message(telegram_id, text=None, content_type=ContentType.PHOTO)
-    state = _make_state(telegram_id)
-    await state.set_state(Support.waiting_message)
-
-    # handle_pomoc_non_text takes no Bot at all -- structurally incapable
-    # of relaying anything, which is what invariant 3 requires for this
-    # direction.
-    await handle_pomoc_non_text(message, db_session)
-
-    message.answer.assert_awaited_once_with(t("support.non_text_refusal", _LANG))
-    assert await state.get_state() == Support.waiting_message.state
-
-
-async def test_rate_cap_blocks_the_sixth_message_in_an_hour(
-    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "555555")
-    telegram_id = 950008
-    bot = _make_bot()
-
-    for _ in range(5):
-        state = _make_state(telegram_id)
-        await state.set_state(Support.waiting_message)
-        message = _make_message(telegram_id, text="wiadomosc")
-        await handle_pomoc_message(message, state, db_session, bot)
-
-    assert bot.send_message.await_count == 5
-
-    state = _make_state(telegram_id)
-    await state.set_state(Support.waiting_message)
-    blocked_message = _make_message(telegram_id, text="szosta wiadomosc")
-    await handle_pomoc_message(blocked_message, state, db_session, bot)
-
-    # Nothing new was sent to any operator for the over-cap attempt.
-    assert bot.send_message.await_count == 5
-    blocked_message.answer.assert_awaited_once_with(t("support.rate_limited", _LANG))
+    conversation = await crud.get_support_conversation(db_session, telegram_id)
+    assert conversation.is_open is True
 
 
 async def test_operator_reply_is_delivered_only_to_its_own_mapped_user(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
-    operator_id = 666666
+    operator_id = 966666
     monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
-    user_a, user_b = 950010, 950011
+    user_a, user_b = 960010, 960011
     await crud.create_support_thread(db_session, operator_id, 1001, user_a)
     await crud.create_support_thread(db_session, operator_id, 1002, user_b)
     await db_session.commit()
@@ -258,7 +131,7 @@ async def test_operator_reply_is_delivered_only_to_its_own_mapped_user(
 async def test_operator_reply_with_no_mapping_tells_the_operator_and_relays_nothing(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ):
-    operator_id = 777777
+    operator_id = 977777
     monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
     bot = _make_bot()
     reply = _make_reply_message(operator_id, reply_to_message_id=99999, text="?")
@@ -267,3 +140,92 @@ async def test_operator_reply_with_no_mapping_tells_the_operator_and_relays_noth
 
     bot.send_message.assert_not_awaited()
     reply.answer.assert_awaited_once()
+
+
+async def test_reply_button_tap_opens_an_operator_session_named_for_the_player(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 968001
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_id = 960020
+    await _add_account(db_session, "SUP8001", player_id, "Szewczyk Jagoda")
+    await db_session.commit()
+
+    callback = _make_callback(operator_id)
+    callback_data = SupportReplyCallback(user_telegram_id=player_id)
+
+    await handle_support_reply_tap(callback, callback_data, db_session)
+
+    session_row = await crud.get_operator_session(db_session, operator_id)
+    assert session_row is not None
+    assert session_row.user_telegram_id == player_id
+    callback.message.answer.assert_awaited_once()
+    confirmation_text = callback.message.answer.await_args_list[0].args[0]
+    assert "Jagoda Szewczyk" in confirmation_text
+    assert "SUP8001" in confirmation_text
+
+
+async def test_reply_button_tap_from_a_non_operator_opens_nothing(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "968002")
+    not_an_operator = 968003
+    callback = _make_callback(not_an_operator)
+    callback_data = SupportReplyCallback(user_telegram_id=960021)
+
+    await handle_support_reply_tap(callback, callback_data, db_session)
+
+    assert await crud.get_operator_session(db_session, not_an_operator) is None
+    callback.message.answer.assert_not_awaited()
+    callback.answer.assert_awaited_once()
+
+
+async def test_close_conversation_ends_the_operator_session_and_tells_both_sides(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 968010
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    player_id = 960030
+    now = datetime.now(timezone.utc)
+    await crud.open_operator_session(db_session, operator_id, player_id, now)
+    await crud.open_support_conversation(db_session, player_id, now)
+    await db_session.commit()
+
+    callback = _make_callback(operator_id)
+    bot = _make_bot()
+
+    await handle_support_close_tap(callback, db_session, bot)
+
+    assert await crud.get_operator_session(db_session, operator_id) is None
+    player_conversation = await crud.get_support_conversation(db_session, player_id)
+    assert player_conversation.is_open is False
+
+    callback.message.answer.assert_awaited_once_with("Conversation closed.")
+    bot.send_message.assert_awaited_once()
+    assert bot.send_message.await_args_list[0].args[0] == player_id
+    assert bot.send_message.await_args_list[0].args[1] == t("support.conversation_closed_by_operator", _LANG)
+
+
+async def test_close_conversation_from_a_non_operator_does_nothing(db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "968020")
+    not_an_operator = 968021
+    callback = _make_callback(not_an_operator)
+    bot = _make_bot()
+
+    await handle_support_close_tap(callback, db_session, bot)
+
+    bot.send_message.assert_not_awaited()
+    callback.message.answer.assert_not_awaited()
+    callback.answer.assert_awaited_once()
+
+
+async def test_close_conversation_with_nothing_open_tells_the_operator_plainly(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+):
+    operator_id = 968030
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    callback = _make_callback(operator_id)
+    bot = _make_bot()
+
+    await handle_support_close_tap(callback, db_session, bot)
+
+    bot.send_message.assert_not_awaited()
+    callback.message.answer.assert_awaited_once_with("CourtDuo support: no conversation was open.")
