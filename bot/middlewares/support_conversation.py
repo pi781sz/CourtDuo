@@ -23,7 +23,7 @@ Order of checks, all lazy -- no scheduler anywhere:
 
   1. An explicit reply-to always wins (CLAUDE.md: "explicit beats
      implicit") -- untouched, falls through to bot.handlers.support's own
-     `_is_operator_reply` path unchanged.
+     `_is_operator_reply` path unchanged, suspended session or not.
   2. Non-text content: refused with a plain message if either side has an
      open conversation with this sender, otherwise ignored (falls through,
      same as before this step).
@@ -31,13 +31,23 @@ Order of checks, all lazy -- no scheduler anywhere:
      Telegram id's own player conversation (a no-op if it had none), then
      falls through so the real command/label router handles it normally.
   4. An operator (`alarm_recipients()`) with an open, unexpired session:
-     relayed to the player that session names. Expired: the session is
-     closed, the operator told, offered a button to reopen -- nothing is
-     delivered.
+     relayed to the player that session names, with a one-line English
+     delivery receipt back to the operator naming who got it. Expired:
+     the session is closed, the operator told, offered a button to
+     reopen -- nothing is delivered. SUSPENDED (see step 5): nothing is
+     delivered either -- the operator is shown one "Reply: {name}" button
+     per player currently waiting and must pick one before anything they
+     type reaches anybody.
   5. A player with an open, unexpired conversation: relayed to every
      operator, rate-capped exactly as the one-shot /pomoc relay always
-     was. Expired: the conversation is closed, the player told their
-     message was not sent, pointed at /pomoc -- nothing is relayed.
+     was, with no automatic reply to the player -- the operator's own
+     answer is the next thing they see. Any *other* operator whose own
+     open session currently names someone other than this sender is
+     flipped to SUSPENDED at the same moment (CLAUDE.md: "A SUSPENDED
+     SESSION, FAILING CLOSED") -- fail closed rather than let a stale
+     target silently receive whatever that operator types next. Expired:
+     the conversation is closed, the player told their message was not
+     sent, pointed at /pomoc -- nothing is relayed.
   6. An operator with no Account row, plain text, no open conversation,
      no reply-to: told there is no open conversation instead of falling
      into the registration handler (the bug this step fixes -- CLAUDE.md,
@@ -59,7 +69,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from bot.attempt_limiter import FailedAttemptLimiter
 from bot.i18n import t
-from bot.keyboards.support import support_reply_keyboard
+from bot.keyboards.support import support_reply_keyboard, support_suspended_keyboard
 from bot.lang import lang_for
 from bot.notifications import push
 from bot.staleness import alarm_recipients
@@ -110,6 +120,26 @@ async def _relay_player_message(session, bot: Bot, account, telegram_id: int, te
         if sent_message_id is None:
             continue
         await crud.create_support_thread(session, operator_id, sent_message_id, telegram_id)
+
+
+async def _waiting_players(session, now: datetime, op_session) -> list[tuple[int, str]]:
+    """Every player worth offering a SUSPENDED operator session a
+    "Reply: {name}" button for (CLAUDE.md: "the bot replies ... naming
+    both waiting players"): whoever the session still remembers being
+    with -- it never forgets that on its own -- plus every player
+    currently sitting on an unexpired open conversation. Sorted by
+    Telegram id purely for a stable, deterministic button order."""
+    telegram_ids = {op_session.user_telegram_id}
+    for conversation in await crud.list_open_support_conversations(session):
+        if now - conversation.last_activity_at <= PLAYER_CONVERSATION_TTL:
+            telegram_ids.add(conversation.user_telegram_id)
+
+    waiting: list[tuple[int, str]] = []
+    for user_telegram_id in sorted(telegram_ids):
+        account = await crud.get_account_by_telegram_id(session, user_telegram_id)
+        name = display_name(account.full_name) if account is not None else f"telegram id {user_telegram_id}"
+        waiting.append((user_telegram_id, name))
+    return waiting
 
 
 class SupportConversationMiddleware(BaseMiddleware):
@@ -190,11 +220,37 @@ class SupportConversationMiddleware(BaseMiddleware):
                         )
                         return None
 
+                    if op_session.state == "suspended":
+                        # CLAUDE.md: "A SUSPENDED SESSION, FAILING CLOSED"
+                        # -- another player wrote in while this operator
+                        # was away from this one. Nothing typed here is
+                        # delivered to anyone until they explicitly pick
+                        # who they mean again.
+                        waiting = await _waiting_players(session, now, op_session)
+                        await session.commit()
+                        await event.answer(
+                            "CourtDuo support: more than one player is waiting and this "
+                            "conversation is suspended. Nothing you type is delivered until "
+                            "you choose who to reply to:",
+                            reply_markup=support_suspended_keyboard(waiting),
+                        )
+                        return None
+
                     watched_account = await crud.get_account_by_telegram_id(session, op_session.user_telegram_id)
+                    watched_name = (
+                        display_name(watched_account.full_name)
+                        if watched_account is not None
+                        else f"telegram id {op_session.user_telegram_id}"
+                    )
                     reply_text = f"{t('support.reply_header', lang_for(watched_account))}\n\n{escape(text)}"
-                    await push(bot, op_session.user_telegram_id, reply_text)
+                    sent_message_id = await push(bot, op_session.user_telegram_id, reply_text)
                     await crud.touch_operator_session(session, telegram_id, now)
                     await session.commit()
+                    if sent_message_id is not None:
+                        # CLAUDE.md: "DELIVERY RECEIPTS TO THE OPERATOR" --
+                        # what makes a misroute visible on the spot instead
+                        # of several messages later.
+                        await event.answer(f"Sent to {watched_name}.")
                     return None
 
             conversation = await crud.get_support_conversation(session, telegram_id)
@@ -212,9 +268,17 @@ class SupportConversationMiddleware(BaseMiddleware):
                 _relay_limiter.record_failure(telegram_id)
 
                 await _relay_player_message(session, bot, account, telegram_id, text)
+                # CLAUDE.md: "A SUSPENDED SESSION, FAILING CLOSED" -- any
+                # other operator's own open session that names someone
+                # other than this sender must not go on delivering to a
+                # stale target now that this player has written in too.
+                await crud.suspend_other_operator_sessions(session, telegram_id)
                 await crud.touch_support_conversation(session, telegram_id, now)
                 await session.commit()
-                await event.answer(t("support.confirmation", lang))
+                # CLAUDE.md: "REMOVE THE PER-MESSAGE CONFIRMATION TO THE
+                # PLAYER" -- the conversation-opened message already told
+                # them their answer arrives here; the next thing they see
+                # is the operator's own reply.
                 return None
 
             if is_operator and account is None:
