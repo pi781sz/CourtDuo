@@ -38,6 +38,7 @@ from bot.handlers import (
 from bot.i18n import t
 from bot.lang import DEFAULT_LANG
 from bot.middlewares.db import DbSessionMiddleware
+from bot.middlewares.support_conversation import SupportConversationMiddleware
 from bot.middlewares.viewer_guard import ViewerActionGuardMiddleware
 from bot.staleness import register as register_staleness_alarm
 
@@ -80,6 +81,17 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     # `session`, and before every feature router so it sees every callback
     # query regardless of which router would otherwise have handled it.
     dispatcher.callback_query.middleware(ViewerActionGuardMiddleware())
+    # CLAUDE.md "Operations" > "Support": the open conversation on both
+    # sides of /pomoc. Registered as an OUTER middleware -- unlike
+    # db_middleware/ViewerActionGuardMiddleware above, this one has to run
+    # ahead of every router's own filter checks, not just wrap whichever
+    # handler ends up matching, so it can catch a player's or an
+    # operator's plain text before any router claims it. A command (this
+    # includes /status) or a persistent-reply-keyboard label always falls
+    # straight through untouched -- see the module docstring -- so this
+    # does not change /status's own "nothing else gets a chance to
+    # intercept it first" guarantee below.
+    dispatcher.message.outer_middleware(SupportConversationMiddleware(session_factory))
 
     # CLAUDE.md "Operations": /status is registered before every other
     # router so nothing else gets a chance to intercept it first.
@@ -98,10 +110,10 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     dispatcher.include_router(moje_deble_router)
     dispatcher.include_router(invite_friend_router)
     dispatcher.include_router(viewers_router)
-    # support_router carries /pomoc's message-state handler alongside these
-    # -- CLAUDE.md "Operations" > "Support": a persistent-reply-keyboard tap
-    # must still win against the support FSM state, exactly as it already
-    # must against every other mid-flow state.
+    # support_router carries /pomoc itself, the reply-to fallback, and the
+    # operator's two buttons -- the open-conversation relay is handled by
+    # SupportConversationMiddleware above, ahead of every router, so this
+    # one's position here only matters for /pomoc and the reply-to path.
     dispatcher.include_router(support_router)
     dispatcher.include_router(start_router)
     dispatcher.include_router(tournament_search_router)

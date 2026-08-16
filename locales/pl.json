@@ -214,8 +214,10 @@
     }
   },
   "support": {
-    "prompt": "Napisz swoje pytanie w jednej wiadomości. Odpowiemy tutaj, na Telegramie.",
+    "conversation_opened": "Rozmowa z pomocą jest otwarta. Napisz swoje pytanie — dopóki rozmowa jest otwarta, nie musisz ponownie wpisywać /pomoc. Zamknie się automatycznie po 30 minutach bez aktywności.",
     "confirmation": "Wiadomość została wysłana. Odpowiedź otrzymasz tutaj, na Telegramie.",
+    "conversation_expired": "Rozmowa z pomocą zakończyła się z powodu braku aktywności. Wiadomość nie została wysłana. Napisz /pomoc, aby zacząć od nowa.",
+    "conversation_closed_by_operator": "Rozmowa z pomocą została zakończona. Jeśli masz kolejne pytanie, napisz /pomoc.",
     "non_text_refusal": "Możemy przyjąć tylko wiadomość tekstową. Napisz swoje pytanie jako tekst.",
     "rate_limited": "Zbyt wiele wiadomości. Spróbuj ponownie za godzinę.",
     "reply_header": "CourtDuo Pomoc"
