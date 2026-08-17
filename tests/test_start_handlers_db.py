@@ -323,3 +323,120 @@ async def test_completing_registration_allowlisted_for_viewers_gets_the_fourth_p
     assert len(markups) == 1
     rows = [[button.text for button in row] for row in markups[0].keyboard]
     assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"], ["Podgląd konta"]]
+
+
+# --- bug fix: /start for an operator (alarm_recipients()) with no Account -----
+#
+# Reported bug (test bot): an operator sent /start, got the ordinary
+# "podaj swój login PZT" prompt, typed a PZT login in reply -- and because
+# that same operator already had a support conversation open with a
+# player, SupportConversationMiddleware relayed the login text to that
+# child instead of it ever reaching registration. ALARM_TELEGRAM_IDS ids
+# can never actually register (CLAUDE.md, "Operations" > "Support", THE
+# REGISTRATION FALL-THROUGH), so the prompt was a guaranteed dead end on
+# top of the misroute. handle_start must refuse before sending any prompt
+# and before Registration state is ever set.
+
+
+async def test_operator_start_with_no_account_never_enters_registration(db_session: AsyncSession, monkeypatch):
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(_TELEGRAM_ID))
+    message = _make_message()
+    state = _make_state()
+
+    await handle_start(message, state, db_session, _make_bot(), CommandObject())
+
+    assert await state.get_state() is None
+    texts = [c.args[0] for c in message.answer.call_args_list]
+    assert not any("PZT" in text for text in texts)
+    assert any("ALARM_TELEGRAM_IDS" in text for text in texts)
+    # No reply keyboard is attached either -- this is a dead-end refusal,
+    # not the start of any flow.
+    assert not _reply_keyboard_calls(message)
+
+
+async def test_operator_start_with_no_account_and_an_open_session_names_the_player(
+    db_session: AsyncSession, monkeypatch
+):
+    operator_id = _TELEGRAM_ID
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    db_session.add(Player(pzt_id="OPR0001", full_name="Nowak Amelia", club=None, age_category=None, gender=None))
+    await db_session.flush()
+    watched_id = 600200
+    db_session.add(Account(telegram_id=watched_id, pzt_id="OPR0001", full_name="Nowak Amelia", gender="W"))
+    await db_session.flush()
+    await crud.open_operator_session(db_session, operator_id, watched_id, datetime.now(timezone.utc))
+
+    message = _make_message()
+    state = _make_state()
+
+    await handle_start(message, state, db_session, _make_bot(), CommandObject())
+
+    assert await state.get_state() is None
+    texts = [c.args[0] for c in message.answer.call_args_list]
+    assert any("Amelia Nowak" in text for text in texts)
+
+
+async def test_operator_start_with_no_account_and_an_expired_session_omits_the_player(
+    db_session: AsyncSession, monkeypatch
+):
+    from bot.support_conversations import OPERATOR_SESSION_TTL
+
+    operator_id = _TELEGRAM_ID
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(operator_id))
+    db_session.add(Player(pzt_id="OPR0002", full_name="Kowalski Piotr", club=None, age_category=None, gender=None))
+    await db_session.flush()
+    watched_id = 600201
+    db_session.add(Account(telegram_id=watched_id, pzt_id="OPR0002", full_name="Kowalski Piotr", gender="M"))
+    await db_session.flush()
+    stale = datetime.now(timezone.utc) - OPERATOR_SESSION_TTL - timedelta(minutes=1)
+    await crud.open_operator_session(db_session, operator_id, watched_id, stale)
+
+    message = _make_message()
+    state = _make_state()
+
+    await handle_start(message, state, db_session, _make_bot(), CommandObject())
+
+    assert await state.get_state() is None
+    texts = [c.args[0] for c in message.answer.call_args_list]
+    assert not any("Piotr Kowalski" in text for text in texts)
+    assert any("ALARM_TELEGRAM_IDS" in text for text in texts)
+
+
+async def test_operator_start_with_an_account_is_unaffected(db_session: AsyncSession, monkeypatch):
+    # CLAUDE.md task instructions: "An operator id that DOES have an
+    # accounts row keeps working exactly as it does today -- only the
+    # no-account case changes." Same assertions as the plain returning-
+    # player test above, just with this id also on ALARM_TELEGRAM_IDS.
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", str(_TELEGRAM_ID))
+    db_session.add(Player(pzt_id="OPR0003", full_name="Testowy Gracz", club=None, age_category=None, gender=None))
+    await db_session.flush()
+    db_session.add(
+        Account(telegram_id=_TELEGRAM_ID, pzt_id="OPR0003", full_name="Testowy Gracz", gender="M", lang="pl")
+    )
+    await db_session.flush()
+
+    message = _make_message()
+    state = _make_state()
+
+    await handle_start(message, state, db_session, _make_bot(), CommandObject())
+
+    markups = _reply_keyboard_calls(message)
+    assert len(markups) == 1
+    rows = [[button.text for button in row] for row in markups[0].keyboard]
+    assert rows == [["Znajdź partnera"], ["Moje deble", "Zaproś na CourtDuo"]]
+    texts = [c.args[0] for c in message.answer.call_args_list]
+    assert not any("ALARM_TELEGRAM_IDS" in text for text in texts)
+
+
+async def test_non_operator_start_is_byte_for_byte_unchanged(db_session: AsyncSession, monkeypatch):
+    # Invariant 4: an id NOT in alarm_recipients() gets the existing
+    # /start behaviour, unaffected by this fix.
+    monkeypatch.setenv("ALARM_TELEGRAM_IDS", "999999999")
+    message = _make_message()
+    state = _make_state()
+
+    await handle_start(message, state, db_session, _make_bot(), CommandObject())
+
+    assert await state.get_state() == Registration.waiting_pzt_id.state
+    texts = [c.args[0] for c in message.answer.call_args_list]
+    assert any("PZT" in text for text in texts)
