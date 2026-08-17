@@ -31,14 +31,12 @@ from bot.handlers import (
     pending_external_invites_router,
     start_router,
     status_router,
-    support_router,
     tournament_search_router,
     viewers_router,
 )
 from bot.i18n import t
 from bot.lang import DEFAULT_LANG
 from bot.middlewares.db import DbSessionMiddleware
-from bot.middlewares.support_conversation import SupportConversationMiddleware
 from bot.middlewares.viewer_guard import ViewerActionGuardMiddleware
 from bot.staleness import register as register_staleness_alarm
 
@@ -49,13 +47,9 @@ logger = logging.getLogger(__name__)
 
 # The Telegram "/" command menu. One module-level constant -- (command,
 # locale key) pairs -- so adding another command later is a one-line
-# change. Only /start and /pomoc are listed here on purpose: /moje_deble,
-# /usun_konto and /podglad stay reachable as commands but out of the menu
-# (CLAUDE.md, "Operations" > "Support").
-BOT_COMMANDS: tuple[tuple[str, str], ...] = (
-    ("start", "commands.start"),
-    ("pomoc", "commands.pomoc"),
-)
+# change. /moje_deble, /usun_konto and /podglad stay reachable as commands
+# but out of the menu.
+BOT_COMMANDS: tuple[tuple[str, str], ...] = (("start", "commands.start"),)
 
 
 async def set_bot_commands(bot: Bot) -> None:
@@ -81,17 +75,6 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     # `session`, and before every feature router so it sees every callback
     # query regardless of which router would otherwise have handled it.
     dispatcher.callback_query.middleware(ViewerActionGuardMiddleware())
-    # CLAUDE.md "Operations" > "Support": the open conversation on both
-    # sides of /pomoc. Registered as an OUTER middleware -- unlike
-    # db_middleware/ViewerActionGuardMiddleware above, this one has to run
-    # ahead of every router's own filter checks, not just wrap whichever
-    # handler ends up matching, so it can catch a player's or an
-    # operator's plain text before any router claims it. A command (this
-    # includes /status) or a persistent-reply-keyboard label always falls
-    # straight through untouched -- see the module docstring -- so this
-    # does not change /status's own "nothing else gets a chance to
-    # intercept it first" guarantee below.
-    dispatcher.message.outer_middleware(SupportConversationMiddleware(session_factory))
 
     # CLAUDE.md "Operations": /status is registered before every other
     # router so nothing else gets a chance to intercept it first.
@@ -110,11 +93,6 @@ def build_dispatcher(session_factory: async_sessionmaker | None = None) -> Dispa
     dispatcher.include_router(moje_deble_router)
     dispatcher.include_router(invite_friend_router)
     dispatcher.include_router(viewers_router)
-    # support_router carries /pomoc itself, the reply-to fallback, and the
-    # operator's two buttons -- the open-conversation relay is handled by
-    # SupportConversationMiddleware above, ahead of every router, so this
-    # one's position here only matters for /pomoc and the reply-to path.
-    dispatcher.include_router(support_router)
     dispatcher.include_router(start_router)
     dispatcher.include_router(tournament_search_router)
     dispatcher.include_router(partner_selection_router)

@@ -570,74 +570,14 @@ The alarm's message text is operator-facing English, hardcoded in `bot.staleness
 
 **`/status`**, operator-only and gated on the same `ALARM_TELEGRAM_IDS`: plain text, no buttons, no reply keyboard, showing each scraper's last successful run and how long ago, its last run and outcome, and whether it is currently inside its threshold. Registered first in `bot.main` so no other router can intercept it. To anybody not on that list it does nothing at all — no reply, no error — a child typing it sees exactly what they'd see typing any other unknown command.
 
-**The Telegram "/" command menu.** Set programmatically in `bot.main` (`set_bot_commands`, called on startup before polling begins) rather than left to whatever was configured by hand in BotFather. `BOT_COMMANDS`, a module-level constant pairing each command name with its `locales/pl.json` description key, is the only thing that needs to change to add another entry later. Exactly two commands are listed: `/start` and `/pomoc` (see "Support" immediately below). `/moje_deble`, `/usun_konto` and `/podglad` all keep working as typed commands — they're just not in the menu, the same "reachable without needing a button of its own" pattern `/status` already established.
-
-**Support.** `/pomoc` is a two-way relay between a player and the operators in `ALARM_TELEGRAM_IDS` — the same list the staleness alarm and `/status` already read via `alarm_recipients()`. Non-negotiable rule 1 above forbids free-text messaging, but that rule is about messaging *between players*: no player's typed words ever reach another player, and no player can address anyone but an operator through it. This is the one place in CourtDuo where a player types free text, and it stays exactly that narrow — one player to the operators, one operator's reply back to that same one player, never routed sideways to anyone else.
-
-- Works whether or not the Telegram account has an `Account` row — no gate on registration. The single most likely support message is "I could not register," sent by someone who by definition has no account yet.
-
-**Step 14.1: an open conversation on both sides, not a one-shot relay.** Live testing found the original one-shot design (`/pomoc` → one FSM-gated message → relay → state clears) unusable for a single operator handling one conversation at a time on a phone: typing a plain reply didn't route, and it fell through to the registration handler instead, answering a support message with "Nie znaleziono zawodnika o takim loginie PZT". `bot.states.Support.waiting_message` is gone; the open/closed state now lives in two tables, evaluated lazily whenever a message arrives — no scheduler anywhere — because the bot runs under `Restart=always` and the `Dispatcher` uses `MemoryStorage`, so FSM state (or anything in memory) would silently reroute a child's next message after every restart, same reasoning `alarm_state` and `support_threads` already establish:
-
-  ```
-  support_conversations
-    user_telegram_id   bigint primary key
-    is_open            boolean not null
-    last_activity_at   timestamptz not null
-
-  support_operator_sessions
-    operator_telegram_id  bigint primary key
-    user_telegram_id      bigint not null
-    last_activity_at      timestamptz not null
-    state                  text null   -- 'open' | 'suspended' (step 14.2); NULL reads as 'open'
-  ```
-
-  Neither stores a message body, same as `support_threads` below — these three tables only ever answer "who is talking to whom right now", never "what did they say".
-
-  All of this is implemented as one OUTER message middleware, `bot.middlewares.support_conversation.SupportConversationMiddleware`, registered in `bot.main` ahead of every router — it is what lets a player's or an operator's plain text be caught and relayed (or refused, or explained) before any router — including `/status`'s own, which still goes first among routers — ever sees it.
-
-  *Player side.* `/pomoc` opens (or silently re-opens) this Telegram id's own conversation and says so plainly. From then on, every plain-text message this Telegram id sends is relayed to every id in `alarm_recipients()`, one DM each — exactly the original one-shot relay's own fan-out, just repeated for as long as the conversation stays open, with no need to retype `/pomoc`. **Step 14.2 removed the per-message confirmation the player used to get back** (`support.confirmation`, "Wiadomość została wysłana...") — live testing found it firing after every single line of a running conversation, pure noise; the conversation-opened message already tells the player their answer arrives here, so a player now gets no automatic reply to a support message at all — the next thing they see is the operator's own answer. A conversation closes — silently, no message about the close itself, since the player is the one who caused it — the moment its own Telegram id sends any command or taps any persistent-reply-keyboard label (both are "handled normally": the real command/label handler still runs, untouched); it also closes, this time *with* a message, when the operator taps "Close conversation" (below), or when it goes 30 minutes with no activity (`support.conversation_expired` — the message that triggered the check is not relayed, and the player is pointed back at `/pomoc`).
-  - Non-text content (photo, sticker, voice, document, anything) is refused (`support.non_text_refusal`) and never relayed in either direction, exactly as the one-shot design already refused it.
-  - Capped at 5 relayed messages per hour per Telegram account, reusing the shape of `bot.attempt_limiter.FailedAttemptLimiter` as its own separate instance — never sharing the registration limiter's counters, same "one process per bot instance, in-memory counter is fine" reasoning as everywhere else that class is used; over the cap, the player is told (`support.rate_limited`) and nothing is relayed.
-
-  *Operator side.* Every incoming support message carries an inline button, English, `Reply: {name}` (`core.text.display_name`, or a plain "telegram id {id}" fallback for someone with no account yet). Tapping it opens that operator's own conversation in `state='open'`: the bot confirms in plain English, names the player and their pzt_id, states that everything typed from now on goes to them, and carries one inline button, `Close conversation`. While open, every plain-text message that operator sends — no reply-quoting, no button, just typing — is delivered to that one player, headed `support.reply_header` exactly as before, and now gets a one-line English delivery receipt back — `Sent to {name}.` — the moment `push()` confirms it landed (step 14.2, "DELIVERY RECEIPTS TO THE OPERATOR": what makes a misroute visible on the spot instead of several messages later, rather than only after the fact). No receipt is sent when `push()` itself reports the delivery failed (blocked bot, deleted chat) — a receipt promises delivery, not an attempt. **If a different player writes while a conversation is open, the open conversation never silently switches** — the new message gets its own `Reply: {name}` button like any other, and the operator's session keeps naming whoever it already named until they explicitly act.
-  - A command from an operator (this includes `/status`) is never swallowed by an open session, regardless of how recently they typed — a command always falls straight through to its own handler, which is what keeps `/status`'s "nothing else gets a chance to intercept it first" guarantee true even for an operator mid-conversation.
-
-**Step 14.2: a SUSPENDED session, failing closed.** Live testing on the test bot found the "never silently switches" promise above was true and still not enough: with an open session on player A, player B sent `/pomoc` and a message — B's own message correctly got its own `Reply: {name}` button, and the operator's session correctly stayed pointed at A — but the operator, not noticing the second incoming message, then typed a reply meant for B, and it went to A. Nothing in "never silently switches" actually stopped them from typing while the session still named someone else; that is a design gap, not a routing bug, in the mechanism step 14.1 built. The fix keeps "never silently switches" exactly as it is — the target still never changes on its own — and adds a second, independent guard on top: the moment any player *other than* the one an operator's own open session names gets a message relayed, that operator's session flips to `state='suspended'`, on every operator whose session currently names anyone else (not just the one this new message happens to be about). A suspended session still remembers `user_telegram_id` — it simply refuses to deliver.
-  - While suspended, a plain-text message from that operator delivers to **nobody**. Instead the bot replies in English naming every player currently waiting (whoever the session was already with, plus everyone else sitting on an unexpired open conversation), with one `Reply: {name}` button per player — the exact same callback the original incoming-message button uses.
-  - Tapping one resumes the session with that player (`state` back to `'open'`) and delivers nothing retroactively: whatever the operator typed while suspended is simply gone, never sent to anyone. They have to retype it once they know who they're actually answering — a message written for one child must never reach another just because a button was tapped afterwards.
-  - A reply-to-message still works while suspended and still wins, completely untouched: it names its recipient unambiguously via `support_threads` regardless of any `state`, exactly as "explicit beats implicit" already required before this step.
-  - The 30-/60-minute expiry windows are unchanged — a suspended session that goes stale on `last_activity_at` still expires exactly as an open one does.
-
-  These three changes — no player-side confirmation, delivery receipts, and the SUSPENDED fail-closed state — are amendments to step 14.1's own design, not a new mechanism: the same two tables, the same middleware, the same buttons, one nullable column added.
-
-  *Reply-to still works, and always wins.* An operator answering with Telegram's own native reply on the DM they received — rather than typing fresh — is untouched by any of the above: explicit beats implicit, so a reply-to is checked first and bypasses the open-conversation machinery entirely, exactly as it always has. The bot looks up which player that specific delivered copy belongs to (`support_threads`, below) and relays the reply back to that one player only, prefixed with `support.reply_header`. Only an id in `alarm_recipients()` may do this at all — a reply-to from anyone else produces no outbound message and no reply of any kind, the same "invisible, not merely locked" discipline `/status` and `/podglad` already use for a non-operator. If the replied-to message doesn't map to anything (too old, or a row that was never written), the operator is told plainly instead — never a silent no-op, and never a guessed recipient.
-
-  *The registration fall-through, fixed.* An id in `alarm_recipients()` with no `Account` row, sending plain text with no open conversation and no reply-to, now gets a short English note — no open conversation, tap Reply on a support message to open one — instead of ever reaching the registration handler. The trade-off this implies, stated plainly: **an id on `ALARM_TELEGRAM_IDS` cannot register as a player while it is on that list.** That's correct for an operator account; anyone who genuinely needs to register removes the id from `ALARM_TELEGRAM_IDS`, registers, and adds it back.
-
-  **Step 14.3: `/start` itself was still the one door the previous fix left open.** Live testing on the test bot: an operator sent `/start`, got the ordinary "Aby zacząć, podaj swój login PZT." prompt (`/start` is a command, so `SupportConversationMiddleware` always lets it fall straight through to `bot.handlers.start.handle_start`, unaffected by any open session), typed a PZT login in reply — and because that same operator already had a support conversation open with a player, the login text was relayed to that child as a support reply instead of ever reaching registration. Two faults: the prompt itself is a guaranteed dead end (the trade-off above already makes registration impossible for this id), and the middleware has no way to tell "an operator answering the bot's own prompt" apart from "an operator replying to whoever their open session names" — it only sees plain text from an id in `alarm_recipients()`. The fix is in `handle_start`, not the middleware: an id in `alarm_recipients()` with no `Account` row now gets a short hardcoded English note on `/start` itself — the same ALARM_TELEGRAM_IDS trade-off, spelled out, naming the player if this id's own operator session is currently open and unexpired ("anything you type next goes to them, not to the bot") — and neither enters the registration flow nor sets `Registration.waiting_pzt_id`, so there is no prompt left for a later message to be mistaken for an answer to. An id in `alarm_recipients()` that already has its own `Account` row is unaffected — that path was never the dead end this fixes. A command was, and remains, never relayed regardless of session state: `is_command`/`is_nav_label` are checked in `SupportConversationMiddleware` ahead of every relay branch, so `/start` (and any other command) always falls through to its own router untouched, open, suspended or expired session notwithstanding.
-
-- `support_threads` holds one row per (operator, delivered message) — a message relayed to three operators writes three rows, so whichever one actually answers still routes back to the right player:
-
-  ```
-  support_threads
-    id                   integer primary key
-    operator_chat_id     bigint not null
-    operator_message_id  bigint not null
-    user_telegram_id     bigint not null
-    created_at           timestamptz not null
-    unique (operator_chat_id, operator_message_id)
-  ```
-
-  Deliberately holds no message body, in either direction — this table only ever answers "which player does this operator's message belong to"; Telegram already holds the actual conversation, and CourtDuo has no reason to keep a second, stored copy of a child's words. Must be a table, not an in-memory dict, for the same reason `alarm_state` is one: the bot runs under `Restart=always` and the `Dispatcher` uses `MemoryStorage`, so anything kept only in memory would break every reply across a restart.
-- Operator-facing text (who a message is from, the no-mapping notice, the two buttons' own labels, the expiry/reopen notice) is hardcoded English, exactly like the rest of this "Operations" section — the same narrow, deliberate exception to "never hardcode user-facing strings" above, for the same reason: it never reaches a player. Every player-facing string lives under `support.*` in `locales/pl.json`, through `t()`, same as anywhere else in the bot.
-- Not on the persistent reply keyboard, and no FAQ or submenu of any kind — `/pomoc` is a command and a "/" menu entry only, reachable the same way `/status` and `/podglad` are reachable without a button of their own.
+**The Telegram "/" command menu.** Set programmatically in `bot.main` (`set_bot_commands`, called on startup before polling begins) rather than left to whatever was configured by hand in BotFather. `BOT_COMMANDS`, a module-level constant pairing each command name with its `locales/pl.json` description key, is the only thing that needs to change to add another entry later. Exactly one command is listed: `/start`, described as "Home" (`commands.start` — the English word is deliberate). `/moje_deble`, `/usun_konto` and `/podglad` all keep working as typed commands — they're just not in the menu, the same "reachable without needing a button of its own" pattern `/status` already established.
 
 ---
 
 ## Build order
 
 Fourteen steps are built, merged, deployed and tested end-to-end against live PZT
-data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.8, 10.1–10.2, 12.1–12.2, 14.1) were
+data on the test bot. Sub-steps (4.5, 5.1–5.5, 7.1, 8.1–8.8, 10.1–10.2, 12.1–12.2) were
 corrections and refinements found by live testing; their behaviour is documented
 in the relevant sections above, which are the authoritative description. Steps
 11, 12, 13 and 14 were added after the original ten, once real users became imminent
@@ -657,7 +597,7 @@ deletion and blocking" for their authoritative descriptions.
 11. ~~Staleness alarm and `/status`~~ **done**
 12. ~~Account deletion and blocking~~ **done**
 13. ~~Scrapers onto systemd timers, with logrotate~~ **done**
-14. ~~Telegram "/" command menu and `/pomoc` support relay~~ **done**
+14. ~~Telegram "/" command menu~~ **done** (a `/pomoc` support relay was built and deployed to the test bot under this step, then removed before shipping to production — Piotr decided not to ship it, and the bot moved to feature freeze. The command menu lists a single `/start` entry.)
 
 ## Not yet built
 
