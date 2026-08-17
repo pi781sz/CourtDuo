@@ -25,9 +25,7 @@ from bot.lang import DEFAULT_LANG, lang_for
 from bot.notifications import push
 from bot.pending_external_invites import notify_pending_external_invites
 from bot.registration import RegistrationOutcome, register_by_pzt_id
-from bot.staleness import alarm_recipients
 from bot.states import Registration
-from bot.support_conversations import OPERATOR_SESSION_TTL
 from bot.viewers import ViewerBindOutcome, bind_viewer
 from core.text import display_name, first_name
 from db import crud
@@ -117,38 +115,6 @@ async def handle_start(
             t("start.greeting_viewer", DEFAULT_LANG), reply_markup=viewer_menu_keyboard(DEFAULT_LANG)
         )
         await render_moje_deble_for_viewer(message, session, message.from_user.id, DEFAULT_LANG)
-        return
-
-    # CLAUDE.md step 14.3: an id in alarm_recipients() with no Account row
-    # can never finish registration -- see bot.middlewares.support_conversation's
-    # own "registration fall-through" fix, the same trade-off applies here
-    # by construction. Offering the PZT-id prompt here is a guaranteed dead
-    # end, and worse: SupportConversationMiddleware cannot tell "an
-    # operator answering the bot's own prompt" apart from "an operator
-    # replying to whichever player their own open session names" -- so
-    # whatever this id typed next would be relayed to that child instead
-    # of ever reaching registration. Refuse before any prompt is sent and
-    # before Registration state is ever set -- this id keeps its ordinary
-    # operator/support behaviour untouched otherwise.
-    if message.from_user.id in alarm_recipients():
-        note = (
-            "CourtDuo support: this Telegram id is on ALARM_TELEGRAM_IDS, so it can't "
-            "register as a player. To register it, remove it from ALARM_TELEGRAM_IDS, "
-            "restart the service, and send /start again."
-        )
-        op_session = await crud.get_operator_session(session, message.from_user.id)
-        if op_session is not None and datetime.now(timezone.utc) - op_session.last_activity_at <= OPERATOR_SESSION_TTL:
-            watched_account = await crud.get_account_by_telegram_id(session, op_session.user_telegram_id)
-            watched_name = (
-                display_name(watched_account.full_name)
-                if watched_account is not None
-                else f"telegram id {op_session.user_telegram_id}"
-            )
-            note += (
-                f" You still have a support conversation open with {watched_name} -- "
-                "anything you type next goes to them, not to the bot."
-            )
-        await message.answer(note)
         return
 
     # CLAUDE.md step 8.4: the persistent reply keyboard is attached on this
